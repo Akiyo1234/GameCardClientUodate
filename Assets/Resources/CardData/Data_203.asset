@@ -1,0 +1,19 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 58d6730b6a0e9f04682de10c414e3ac1, type: 3}
+  m_Name: Data_203
+  m_EditorClassIdentifier: Assembly-CSharp::CardData
+  cardId: 203
+  tier: 2
+  cardImage: {fileID: -4215024844286044846, guid: e8a0ff5b5bcec114fb4b6e257c12892b, type: 3}
+  costs: 000000000500000000000000000000000000000000000000
+  victoryPoints: 2
