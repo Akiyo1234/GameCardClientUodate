@@ -1,49 +1,72 @@
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
-using TMPro; // สำคัญมาก ต้องมีเพื่อใช้ TextMeshPro
+using TMPro;
 
 public class ResourceButton : MonoBehaviour, IPointerClickHandler
 {
     public Image iconImage;
-    public TextMeshProUGUI pendingAmountText; // ช่องสำหรับใส่ตัวหนังสือ x1, x2
+    public TextMeshProUGUI pendingAmountText; // เลข x1, x2 (ตอนกำลังหยิบ)
+    public TextMeshProUGUI remainingAmountText; // เลขบอกจำนวนคงเหลือ
     public string resourceType;
     
     private GameController gameController;
 
-    void Awake() 
+    // Awake: สำหรับปุ่มเหรียญที่ถูกวางมือใน Scene (ไม่ได้สร้างจากโค้ด)
+    void Awake()
     {
-        gameController = FindFirstObjectByType<GameController>();
+        if (gameController == null)
+            gameController = FindFirstObjectByType<GameController>();
     }
 
+    // Setup แบบมี GameController ส่งเข้ามา (สำหรับ SpawnResourceBank)
+    public void Setup(GameController gc, string type)
+    {
+        gameController = gc;
+        resourceType = type;
+        Sprite s = Resources.Load<Sprite>("Tokens/" + type);
+        if (s != null && iconImage != null) iconImage.sprite = s;
+        UpdatePendingUI(0);
+    }
+
+    // Setup แบบไม่มี GameController (backward compatible)
     public void Setup(string type)
     {
+        if (gameController == null)
+            gameController = FindFirstObjectByType<GameController>();
         resourceType = type;
-        
-        // โหลดรูปภาพเหรียญตามชื่อ (คุณตั้งชื่อไฟล์เหรียญไว้ในโฟลเดอร์ Resources/Tokens/ ถูกต้องไหมครับ)
         Sprite s = Resources.Load<Sprite>("Tokens/" + type);
-        if (s != null && iconImage != null) {
-            iconImage.sprite = s;
-        }
-
-        UpdatePendingUI(0); // เริ่มเกมมาให้ตัวเลขเป็น 0 (ซ่อนไว้)
+        if (s != null && iconImage != null) iconImage.sprite = s;
+        UpdatePendingUI(0);
     }
 
-    // ฟังก์ชันนี้ GameController จะเป็นคนเรียกใช้เพื่อสั่งเปลี่ยนตัวเลข
     public void UpdatePendingUI(int amount)
     {
         if (pendingAmountText != null)
-        {
-            // ถ้า amount มากกว่า 0 ให้โชว์ข้อความ เช่น "x1" ถ้าเป็น 0 ให้เป็นค่าว่าง "" (ซ่อนไว้)
             pendingAmountText.text = amount > 0 ? "x" + amount.ToString() : ""; 
-        }
+    }
+
+    // อัปเดตตัวเลขเหรียญคงเหลือ
+    public void UpdateRemainingUI(int amount)
+    {
+        if (remainingAmountText != null)
+            remainingAmountText.text = amount.ToString();
     }
 
     public void OnPointerClick(PointerEventData eventData)
     {
-        if (gameController != null) {
-            // ส่ง "ตัวมันเอง" (this) ไปให้ GameController ตรวจสอบกฎการหยิบ
-            gameController.OnResourceClicked(this); 
+        // fallback: ถ้ายังไม่มี reference ให้ลองหาอีกครั้ง
+        if (gameController == null)
+            gameController = FindFirstObjectByType<GameController>();
+
+        if (gameController != null)
+        {
+            Debug.Log($"<color=green>[ResourceButton]</color> กดเหรียญ: {resourceType}");
+            gameController.OnResourceClicked(this);
+        }
+        else
+        {
+            Debug.LogError("[ResourceButton] หา GameController ไม่เจอเลย! ตรวจดูว่ามี GameController อยู่ใน Scene หรือเปล่า");
         }
     }
 }

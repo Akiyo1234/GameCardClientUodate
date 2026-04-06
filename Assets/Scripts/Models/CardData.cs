@@ -1,14 +1,17 @@
 using UnityEngine;
 
-[CreateAssetMenu(fileName = "NewCardData", menuName = "GameData/CardData")]
+[CreateAssetMenu(fileName = "New Card", menuName = "Card Data")]
 public class CardData : ScriptableObject
 {
     public int cardId;
     public int tier;
-    public Sprite cardImage; // ลากรูปการ์ดมาใส่ในไฟล์นี้ได้เลย
-
-    [Header("Costs (0:CPU, 1:RAM, 2:Net, 3:Store, 4:Sec, 5:Wild)")]
-    public int[] costs = new int[6]; 
     
-    public int victoryPoints; // แต้มของการ์ดใบนี้
+    [Header("Costs (CPU, RAM, Net, Store, Sec, Wild)")]
+    public int[] costs = new int[6];
+    
+    public int victoryPoints;
+
+    [Header("Card Bonus (ส่วนลดที่ให้)")]
+    [Tooltip("0:CPU, 1:RAM, 2:Network, 3:Storage, 4:Security")]
+    public int bonusType; // <--- เพิ่มบรรทัดนี้ครับ
 }
