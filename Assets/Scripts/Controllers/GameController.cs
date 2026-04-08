@@ -562,14 +562,27 @@ public class GameController : MonoBehaviour
         if (winner != null) {
             isGameOver = true;
             
+            // --- บันทึกสถิติ Coins และ Points เก็บไว้แสดงที่หน้า Main Menu ---
+            if (!players[0].isBot) // เช็คให้ชัวร์ว่า Player 0 คือคน ไม่ใช่บอท
+            {
+                int currentTotalCoins = PlayerPrefs.GetInt("TotalCoins", 0);
+                int currentTotalPoints = PlayerPrefs.GetInt("TotalPoints", 0);
+                
+                int earnedCoins = GetTotalPlayerCoins(0); // เหรียญที่ player 1 หามาได้
+                int earnedPoints = players[0].currentScore; // คะแนนวิคตอรี่พอยต์
+
+                PlayerPrefs.SetInt("TotalCoins", currentTotalCoins + earnedCoins);
+                PlayerPrefs.SetInt("TotalPoints", currentTotalPoints + earnedPoints);
+                PlayerPrefs.Save();
+                Debug.Log($"[GameController] บันทึกสถิติ! เหรียญรวม: {currentTotalCoins + earnedCoins}, คะแนนรวม: {currentTotalPoints + earnedPoints}");
+            }
+
             // โชว์หน้าสรุปผลตอนจบเกม
             if (resultScreen != null)
             {
                 List<string> rankings = new List<string>();
-                // เรียงลำดับคะแนนทุกคนเพื่อส่งไปแสดง
                 foreach (var p in players) rankings.Add($"{p.nameText.text} : {p.currentScore} แต้ม");
                 
-                // สั่งเปิดหน้าต่าง (Title, Rankings, isGameOver=true)
                 resultScreen.ShowResults("เกมจบแล้ว! ผู้ชนะคือ " + winner.nameText.text, rankings, true);
             }
             else
@@ -641,17 +654,51 @@ public class GameController : MonoBehaviour
         }
     }
     
+    [Header("---- Character System ----")]
+    public CharacterData[] availableCharacters; // ใส่ข้อมูลตัวละครที่มีทั้งหมด
+
     void SetupPlayers() { 
-        if (players == null) return; 
+        if (players == null || availableCharacters == null || availableCharacters.Length == 0) {
+            Debug.LogWarning("[GameController] SetupPlayers aborted: Missing players array or availableCharacters database.");
+            return; 
+        }
+
+        // ดึงชื่อของผู้เล่นจาก PlayerPrefs (ถ้าไม่มีให้ใช้ Player 1)
+        string humanName = PlayerPrefs.GetString("Username", "Player 1");
+        if (string.IsNullOrEmpty(humanName)) humanName = "Player 1";
+
+        // อ่านค่าที่ผู้เล่นเลือกมาจากหน้า Main Menu (ค่าตั้งต้นคือ 0)
+        int selectedCharIndex = PlayerPrefs.GetInt("SelectedCharacter", 0);
+
+        // ดึงตัวละครที่เลือกมาให้ Player 1
+        CharacterData p1Data = availableCharacters[Mathf.Clamp(selectedCharIndex, 0, availableCharacters.Length - 1)];
+
+        // สร้างลิสต์ของตัวละครที่เหลือไว้สุ่มให้บอท
+        List<CharacterData> remainingChars = new List<CharacterData>(availableCharacters);
+        remainingChars.Remove(p1Data);
+
         for (int i = 0; i < players.Length; i++) 
         {
             if (players[i] != null) 
             {
-                players[i].SetupPlayer("Player " + (i + 1)); 
-                
-                // กำหนดว่าเป็นบอทหรือไม่ (Player 1 เป็นคน, ที่เหลือเป็นบอท)
                 players[i].isBot = (i > 0); 
-                if (players[i].isBot) players[i].nameText.text = "Bot " + i;
+                string finalName = "Player " + (i + 1); // บังคับเป็น Player 1, 2, 3, 4 ไว้ก่อน
+
+                if (!players[i].isBot) {
+                    finalName = humanName;
+                    if (players[i].characterPortrait != null) players[i].characterPortrait.sprite = p1Data.portraitSprite;
+                    Debug.Log($"[GameController] Player 1 setup as: {finalName} with character {p1Data.characterName}");
+                } else {
+                    // บอท: ลองหาชื่อจากไฟล์ตัวละคร ถ้าไม่มีให้ใช้ "Player X"
+                    if (remainingChars.Count > 0) {
+                        int r = Random.Range(0, remainingChars.Count);
+                        CharacterData botData = remainingChars[r];
+                        if (!string.IsNullOrEmpty(botData.characterName)) finalName = botData.characterName;
+                        if (players[i].characterPortrait != null) players[i].characterPortrait.sprite = botData.portraitSprite;
+                        remainingChars.RemoveAt(r);
+                    }
+                }
+                players[i].SetupPlayer(finalName);
             }
         }
     }

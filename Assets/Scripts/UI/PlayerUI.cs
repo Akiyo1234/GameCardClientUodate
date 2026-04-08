@@ -8,7 +8,8 @@ public class PlayerUI : MonoBehaviour
     public TextMeshProUGUI nameText;
     public TextMeshProUGUI scoreText;
     public Image panelBackground;
-    public bool isBot; // [NEW] ระบุว่าเป็นบอทหรือไม่
+    public Image characterPortrait; // [NEW] ภาพประจำตัวละคร (ลาก Image จาก UI มาใส่)
+    public bool isBot; // ระบุว่าเป็นบอทหรือไม่
 
     [Header("Resources & Score")]
     public int currentScore = 0; 

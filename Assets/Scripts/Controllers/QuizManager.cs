@@ -234,6 +234,9 @@ public class QuizManager : MonoBehaviour
             foreach (var p in rankedPlayers)
             {
                 string pName = gameController.players[p.playerIndex].nameText.text;
+                if (string.IsNullOrEmpty(pName) || pName.Trim() == "") {
+                    pName = "Player " + (p.playerIndex + 1);
+                }
                 string status = p.isCorrect ? "ถูก" : "ผิด";
                 rankings.Add($"{pName} ({status} - {p.timeTaken:F2}s)");
             }

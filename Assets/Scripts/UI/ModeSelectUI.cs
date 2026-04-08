@@ -1,5 +1,7 @@
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using TMPro;
+using UnityEngine.UI;
 
 public class ModeSelectUI : MonoBehaviour
 {
@@ -9,6 +11,16 @@ public class ModeSelectUI : MonoBehaviour
     public GameObject modeSelectPanel; // หน้าเลือกโหมด (Bot/Room)
     public GameObject lobbyPanel;      // หน้า Lobby (multiplayer)
 
+    [Header("---- Player Stats UI ----")]
+    public TextMeshProUGUI totalCoinsText;
+    public TextMeshProUGUI totalPointsText;
+
+    [Header("---- Character Selection ----")]
+    public CharacterData[] availableCharacters;
+    public Image characterPreviewImage;
+    public TextMeshProUGUI characterNameText;
+    private int currentCharacterIndex = 0;
+
     // ฟังก์ชันเริ่มเกม (Initialization)
     private void Start()
     {
@@ -16,6 +28,17 @@ public class ModeSelectUI : MonoBehaviour
         if (mainMenuPanel != null) mainMenuPanel.SetActive(true);
         if (modeSelectPanel != null) modeSelectPanel.SetActive(false);
         if (lobbyPanel != null) lobbyPanel.SetActive(false);
+
+        // ดึงสถิติผู้เล่นมาแสดง (ถ้าไม่มีจะใช้ค่า 0)
+        int coins = PlayerPrefs.GetInt("TotalCoins", 0);
+        int points = PlayerPrefs.GetInt("TotalPoints", 0);
+
+        if (totalCoinsText != null) totalCoinsText.text = coins.ToString();
+        if (totalPointsText != null) totalPointsText.text = points.ToString();
+
+        // โหลดตัวละครล่าสุดที่เลือกไว้
+        currentCharacterIndex = PlayerPrefs.GetInt("SelectedCharacter", 0);
+        UpdateCharacterPreview();
     }
 
     // ฟังก์ชันกดปุ่ม Play Game จากหน้าหลัก
@@ -64,5 +87,48 @@ public class ModeSelectUI : MonoBehaviour
     {
         Debug.Log("[Mode] เลือกโหมด: ค้นหาห้องอัตโนมัติ");
         // เดี๋ยวเราจะทำหน้านี้ในขั้นตอนถัดไปครับ!
+    }
+
+    // --- ฟังก์ชันย่อยสำหรับหน้าเลือกตัวละคร ---
+    
+    public void OnClickNextCharacter()
+    {
+        if (availableCharacters == null || availableCharacters.Length == 0) return;
+        
+        currentCharacterIndex++;
+        if (currentCharacterIndex >= availableCharacters.Length) currentCharacterIndex = 0;
+        
+        UpdateCharacterPreview();
+        
+        // บันทึกตัวละครที่เลือกลงระบบ
+        PlayerPrefs.SetInt("SelectedCharacter", currentCharacterIndex);
+        PlayerPrefs.Save();
+    }
+
+    public void OnClickPrevCharacter()
+    {
+        if (availableCharacters == null || availableCharacters.Length == 0) return;
+        
+        currentCharacterIndex--;
+        if (currentCharacterIndex < 0) currentCharacterIndex = availableCharacters.Length - 1;
+        
+        UpdateCharacterPreview();
+        
+        // บันทึกตัวละครที่เลือกลงระบบ
+        PlayerPrefs.SetInt("SelectedCharacter", currentCharacterIndex);
+        PlayerPrefs.Save();
+    }
+
+    private void UpdateCharacterPreview()
+    {
+        if (availableCharacters == null || availableCharacters.Length == 0) return;
+        
+        // ป้องกันค่าบั๊ก
+        if (currentCharacterIndex < 0 || currentCharacterIndex >= availableCharacters.Length) currentCharacterIndex = 0;
+
+        CharacterData charData = availableCharacters[currentCharacterIndex];
+        
+        if (characterPreviewImage != null) characterPreviewImage.sprite = charData.portraitSprite;
+        if (characterNameText != null) characterNameText.text = charData.characterName;
     }
 }
