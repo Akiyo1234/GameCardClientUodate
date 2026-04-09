@@ -1,4 +1,5 @@
 using UnityEngine;
+using System.Collections;
 using System.Collections.Generic;
 using TMPro; 
 
@@ -56,8 +57,15 @@ public class GameController : MonoBehaviour
     public GameObject confirmReservePanel; 
     private CardDisplay pendingReserveCard; 
 
+    [Header("---- Bot Settings ----")]
+    [SerializeField] private float botTurnDelay = 0.75f;
+    private BotController botController;
+    private Coroutine botTurnCoroutine;
+    private bool isExecutingBotTurn;
+
     void Awake()
     {
+        EnsureBotController();
         // Setup UI ทุกอย่างก่อน เสมอ ไม่ว่าจะมี cardPrefab หรือไม่
         if (confirmReservePanel != null) confirmReservePanel.SetActive(false);
         ClearWarning();
@@ -127,6 +135,10 @@ public class GameController : MonoBehaviour
         if (QuizManager.Instance != null) {
             Debug.Log("<color=cyan>[GameController] เริ่มเกมรอบแรก -> เรียกควิซตัดสินลำดับการเล่นทันที!</color>");
             QuizManager.Instance.StartQuiz();
+        }
+        else
+        {
+            ScheduleBotTurnIfNeeded();
         }
     }
 
@@ -214,6 +226,7 @@ public class GameController : MonoBehaviour
         ClearPendingCoins();
         UpdateTurnVisuals();
         ResetTimer();
+        ScheduleBotTurnIfNeeded();
     }
 
     public void ShowWarning(string msg)
@@ -261,6 +274,10 @@ public class GameController : MonoBehaviour
     public void OnResourceClicked(ResourceButton clickedBtn)
     {
         if (isGameOver) return; 
+        if (IsCurrentPlayerBot() && !isExecutingBotTurn) {
+            ShowWarning("กำลังเป็นเทิร์นของบอท");
+            return;
+        }
 
         int index = GetResourceIndex(clickedBtn.resourceType);
         
@@ -320,6 +337,10 @@ public class GameController : MonoBehaviour
     public void OnCardClicked(CardDisplay card)
     {
         if (isGameOver) return; 
+        if (IsCurrentPlayerBot() && !isExecutingBotTurn) {
+            ShowWarning("กำลังเป็นเทิร์นของบอท");
+            return;
+        }
 
         if (GetTotalPendingCoins() > 0) {
             ShowWarning("คุณกำลังทำ 2 แอคชั่น! กรุณากดปุ่ม Clear เหรียญออกก่อนกดซื้อการ์ด");
@@ -374,6 +395,10 @@ public class GameController : MonoBehaviour
     public void PromptReserveCard(CardDisplay card)
     {
         if (isGameOver) return;
+        if (IsCurrentPlayerBot() && !isExecutingBotTurn) {
+            ShowWarning("กำลังเป็นเทิร์นของบอท");
+            return;
+        }
         if (GetTotalPendingCoins() > 0) {
             ShowWarning("ทำ 2 แอคชั่นไม่ได้! กรุณา Clear เหรียญก่อนจองการ์ด");
             return;
@@ -446,6 +471,11 @@ public class GameController : MonoBehaviour
         if (isGameOver) return;
         
         PlayerUI p = players[playOrder[currentPlayerIndex]]; // เปลี่ยนเป็นเช็คคนเล่นตามคิว
+
+        if (IsCurrentPlayerBot() && !isExecutingBotTurn) {
+            ShowWarning("กำลังเป็นเทิร์นของบอท");
+            return;
+        }
 
         if (card.ownerUI != p) {
             ShowWarning("ไม่สามารถซื้อการ์ดจองของผู้เล่นอื่นได้!");
@@ -523,6 +553,7 @@ public class GameController : MonoBehaviour
         if (players == null || players.Length == 0) return;
         
         bool isNewRound = false;
+        bool startedQuizThisTurn = false;
         if (currentPlayerIndex >= players.Length) {
             currentPlayerIndex = 0;
             currentRound++;
@@ -539,12 +570,16 @@ public class GameController : MonoBehaviour
         if (isNewRound && currentTurnDisplay > 1 && currentTurnDisplay % quizInterval == 0) {
             if (QuizManager.Instance != null) {
                 Debug.Log($"<color=cyan>[Quiz] รอบที่ {currentTurnDisplay} -> ถึงเวลาเรียกควิซแล้ว!</color>");
+                startedQuizThisTurn = true;
                 QuizManager.Instance.StartQuiz();
             }
         }
 
         ResetTimer();
         UpdateTurnVisuals();
+        if (!startedQuizThisTurn) {
+            ScheduleBotTurnIfNeeded();
+        }
     }
 
     void CheckWinCondition() 
@@ -636,6 +671,49 @@ public class GameController : MonoBehaviour
         int activePlayerIdx = playOrder[currentPlayerIndex];
         for (int i = 0; i < players.Length; i++) 
             if (players[i] != null) players[i].SetActiveTurn(i == activePlayerIdx);
+    }
+
+    void EnsureBotController()
+    {
+        if (botController == null) botController = GetComponent<BotController>();
+        if (botController == null) botController = gameObject.AddComponent<BotController>();
+    }
+
+    bool IsCurrentPlayerBot()
+    {
+        if (players == null || players.Length == 0) return false;
+        if (playOrder == null || playOrder.Length == 0) return false;
+        if (currentPlayerIndex < 0 || currentPlayerIndex >= playOrder.Length) return false;
+
+        int activePlayerIdx = playOrder[currentPlayerIndex];
+        if (activePlayerIdx < 0 || activePlayerIdx >= players.Length) return false;
+
+        return players[activePlayerIdx] != null && players[activePlayerIdx].isBot;
+    }
+
+    void ScheduleBotTurnIfNeeded()
+    {
+        if (botTurnCoroutine != null) {
+            StopCoroutine(botTurnCoroutine);
+            botTurnCoroutine = null;
+        }
+
+        if (isGameOver || !IsCurrentPlayerBot()) return;
+
+        botTurnCoroutine = StartCoroutine(RunBotTurnAfterDelay());
+    }
+
+    IEnumerator RunBotTurnAfterDelay()
+    {
+        yield return new WaitForSeconds(botTurnDelay);
+        botTurnCoroutine = null;
+
+        if (isGameOver || !IsCurrentPlayerBot()) yield break;
+
+        EnsureBotController();
+        isExecutingBotTurn = true;
+        botController.ExecuteTurn(playOrder[currentPlayerIndex]);
+        isExecutingBotTurn = false;
     }
     
     public int GetResourceIndex(string type) {
