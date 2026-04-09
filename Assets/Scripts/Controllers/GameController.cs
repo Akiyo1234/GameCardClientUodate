@@ -36,7 +36,7 @@ public class GameController : MonoBehaviour
     public int[] pendingCoins = new int[6]; 
     public List<ResourceButton> bankButtons = new List<ResourceButton>();
     
-    public int[] bankCoins = new int[6] { 10, 10, 10, 10, 10, 10 }; 
+    public int[] bankCoins = new int[6] { 7, 7, 7, 7, 7, 5 }; 
 
     [Header("---- Turn Timer & Rules ----")]
     public float turnDuration = 30f; 
@@ -63,14 +63,17 @@ public class GameController : MonoBehaviour
     private Coroutine botTurnCoroutine;
     private bool isExecutingBotTurn;
     private bool isGameplayInputLocked;
+    private bool isWaitingForContinueAfterResult;
 
     void Awake()
     {
         EnsureBotController();
         // Setup UI ทุกอย่างก่อน เสมอ ไม่ว่าจะมี cardPrefab หรือไม่
         if (confirmReservePanel != null) confirmReservePanel.SetActive(false);
+        if (resultScreen != null) resultScreen.onClosed = OnResultScreenClosed;
         ClearWarning();
         SetupPlayers();
+        ConfigureBankCoinsByPlayerCount();
 
         // Setup เหรียญในธนาคาร
         if (resourcePrefab != null && resourceBankContainer != null)
@@ -198,6 +201,7 @@ public class GameController : MonoBehaviour
         if (players == null || players.Length == 0) return;
         if (playOrder == null || playOrder.Length == 0) return;
         if (isGameplayInputLocked) return;
+        if (isWaitingForContinueAfterResult) return;
 
         if (currentTurnTime > 0) 
         {
@@ -244,6 +248,26 @@ public class GameController : MonoBehaviour
         }
     }
 
+    public void SetWaitingForContinueAfterResult(bool waiting)
+    {
+        isWaitingForContinueAfterResult = waiting;
+
+        if (waiting)
+        {
+            pendingReserveCard = null;
+            if (confirmReservePanel != null) confirmReservePanel.SetActive(false);
+            System.Array.Clear(pendingCoins, 0, 6);
+            foreach (var btn in bankButtons) if (btn != null) btn.UpdatePendingUI(0);
+        }
+    }
+
+    private void OnResultScreenClosed()
+    {
+        SetWaitingForContinueAfterResult(false);
+        ClearWarning();
+        ScheduleBotTurnIfNeeded();
+    }
+
     public bool IsGameplayInputLocked()
     {
         return isGameplayInputLocked;
@@ -254,6 +278,14 @@ public class GameController : MonoBehaviour
         if (!isGameplayInputLocked) return false;
 
         ShowWarning("กรุณาตอบคำถามก่อน จึงจะกดปุ่มอื่นได้");
+        return true;
+    }
+
+    private bool BlockActionUntilContinue()
+    {
+        if (!isWaitingForContinueAfterResult) return false;
+
+        ShowWarning("กรุณากดเริ่มเกมต่อก่อน");
         return true;
     }
 
@@ -300,6 +332,7 @@ public class GameController : MonoBehaviour
     public void ClearPendingCoins() 
     {
         if (BlockActionDuringQuiz()) return;
+        if (BlockActionUntilContinue()) return;
         if (BlockActionOutsideLocalTurn()) return;
         System.Array.Clear(pendingCoins, 0, 6); 
         foreach (var btn in bankButtons) if (btn != null) btn.UpdatePendingUI(0);
@@ -323,6 +356,7 @@ public class GameController : MonoBehaviour
     public void OnResourceClicked(ResourceButton clickedBtn)
     {
         if (BlockActionDuringQuiz()) return;
+        if (BlockActionUntilContinue()) return;
         if (BlockActionOutsideLocalTurn()) return;
         if (isGameOver) return; 
         if (IsCurrentPlayerBot() && !isExecutingBotTurn) {
@@ -388,6 +422,7 @@ public class GameController : MonoBehaviour
     public void OnCardClicked(CardDisplay card)
     {
         if (BlockActionDuringQuiz()) return;
+        if (BlockActionUntilContinue()) return;
         if (BlockActionOutsideLocalTurn()) return;
         if (isGameOver) return; 
         if (IsCurrentPlayerBot() && !isExecutingBotTurn) {
@@ -448,6 +483,7 @@ public class GameController : MonoBehaviour
     public void PromptReserveCard(CardDisplay card)
     {
         if (BlockActionDuringQuiz()) return;
+        if (BlockActionUntilContinue()) return;
         if (BlockActionOutsideLocalTurn()) return;
         if (isGameOver) return;
         if (IsCurrentPlayerBot() && !isExecutingBotTurn) {
@@ -474,6 +510,7 @@ public class GameController : MonoBehaviour
     public void ConfirmReserve()
     {
         if (BlockActionDuringQuiz()) return;
+        if (BlockActionUntilContinue()) return;
         if (BlockActionOutsideLocalTurn()) return;
         if (IsCurrentPlayerBot() && !isExecutingBotTurn) {
             ShowWarning("กำลังเป็นเทิร์นของบอท");
@@ -489,6 +526,7 @@ public class GameController : MonoBehaviour
     public void CancelReserve()
     {
         if (BlockActionDuringQuiz()) return;
+        if (BlockActionUntilContinue()) return;
         if (BlockActionOutsideLocalTurn()) return;
         if (IsCurrentPlayerBot() && !isExecutingBotTurn) {
             ShowWarning("กำลังเป็นเทิร์นของบอท");
@@ -536,6 +574,7 @@ public class GameController : MonoBehaviour
     public void BuyReservedCard(CardDisplay card)
     {
         if (BlockActionDuringQuiz()) return;
+        if (BlockActionUntilContinue()) return;
         if (BlockActionOutsideLocalTurn()) return;
         if (isGameOver) return;
         
@@ -596,6 +635,7 @@ public class GameController : MonoBehaviour
     public void EndTurn()
     {
         if (BlockActionDuringQuiz()) return;
+        if (BlockActionUntilContinue()) return;
         if (BlockActionOutsideLocalTurn()) return;
         if (isGameOver) return;
 
@@ -769,7 +809,7 @@ public class GameController : MonoBehaviour
             botTurnCoroutine = null;
         }
 
-        if (isGameOver || !IsCurrentPlayerBot()) return;
+        if (isGameOver || isWaitingForContinueAfterResult || !IsCurrentPlayerBot()) return;
 
         botTurnCoroutine = StartCoroutine(RunBotTurnAfterDelay());
     }
@@ -779,7 +819,7 @@ public class GameController : MonoBehaviour
         yield return new WaitForSeconds(botTurnDelay);
         botTurnCoroutine = null;
 
-        if (isGameOver || !IsCurrentPlayerBot()) yield break;
+        if (isGameOver || isWaitingForContinueAfterResult || !IsCurrentPlayerBot()) yield break;
 
         EnsureBotController();
         isExecutingBotTurn = true;
@@ -790,6 +830,32 @@ public class GameController : MonoBehaviour
     public int GetResourceIndex(string type) {
         if (type == "CPU") return 0; if (type == "RAM") return 1; if (type == "Network") return 2;
         if (type == "Storage") return 3; if (type == "Security") return 4; return 5;
+    }
+
+    int GetConfiguredPlayerCount()
+    {
+        if (players == null || players.Length == 0) return 4;
+
+        int count = 0;
+        for (int i = 0; i < players.Length; i++)
+        {
+            if (players[i] != null) count++;
+        }
+
+        return Mathf.Clamp(count, 2, 4);
+    }
+
+    void ConfigureBankCoinsByPlayerCount()
+    {
+        int playerCount = GetConfiguredPlayerCount();
+        int coloredCoins = playerCount == 2 ? 4 : playerCount == 3 ? 5 : 7;
+
+        for (int i = 0; i < 5; i++)
+        {
+            bankCoins[i] = coloredCoins;
+        }
+
+        bankCoins[5] = 5;
     }
     
     void SpawnResourceBank() {

@@ -228,7 +228,12 @@ public class QuizManager : MonoBehaviour
         {
             newTurnOrder[i] = rankedPlayers[i].playerIndex;
         }
-        
+
+        if (resultScreen != null)
+        {
+            gameController.SetWaitingForContinueAfterResult(true);
+        }
+
         gameController.ApplyNewTurnOrder(newTurnOrder);
 
         // โชว์หน้าสรุปผลตอนได้รับลำดับการเล่นใหม่ พร้อมบอกให้จุดพลุถ้ามีคนชนะ!

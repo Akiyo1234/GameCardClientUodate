@@ -3,6 +3,7 @@ using UnityEngine.UI;
 using TMPro;
 using System.Collections.Generic;
 using UnityEngine.SceneManagement;
+using System;
 
 public class ResultScreenUI : MonoBehaviour
 {
@@ -19,6 +20,8 @@ public class ResultScreenUI : MonoBehaviour
     private float countdown;
     private bool isDisplaying = false;
     private bool isGameOver = false;
+    private bool isAutoCloseEnabled = false;
+    public Action onClosed;
 
     [Header("---- Effects ----")]
     public ParticleSystem victoryParticles; // ช่องใส่เอฟเฟกต์พลุ
@@ -31,7 +34,7 @@ public class ResultScreenUI : MonoBehaviour
 
     void Update()
     {
-        if (isDisplaying && countdown > 0)
+        if (isDisplaying && isAutoCloseEnabled && countdown > 0)
         {
             countdown -= Time.deltaTime;
             // อัปเดตข้อความที่ปุ่มเพื่อบอกเวลาถอยหลัง
@@ -52,6 +55,7 @@ public class ResultScreenUI : MonoBehaviour
     public void ShowResults(string title, List<string> playerRankings, bool gameOverStatus, bool playFireworks = false)
     {
         isGameOver = gameOverStatus;
+        isAutoCloseEnabled = gameOverStatus;
         titleText.text = title;
         
         // ลบลิสต์เดิมออกก่อน
@@ -75,6 +79,12 @@ public class ResultScreenUI : MonoBehaviour
         isDisplaying = true;
         mainPanel.SetActive(true);
 
+        if (buttonText != null)
+        {
+            string actionLabel = isGameOver ? "กลับหน้าเมนู" : "เริ่มเกมต่อ";
+            buttonText.text = isAutoCloseEnabled ? $"{actionLabel} ({Mathf.CeilToInt(countdown)}s)" : actionLabel;
+        }
+
         // จุดพลุฉลองถ้าเป็นจบเกม (isGameOver) หรือถูกสั่งให้จุดเฉพาะกิจ (playFireworks)
         if ((isGameOver || playFireworks) && victoryParticles != null)
         {
@@ -93,6 +103,10 @@ public class ResultScreenUI : MonoBehaviour
         {
             // ถ้าจบเกมแล้วกดปุ่ม ให้เด้งกลับหน้าเมนูพรีเมียม "Mainmenu 1"
             SceneManager.LoadScene("Mainmenu 1"); 
+        }
+        else
+        {
+            onClosed?.Invoke();
         }
     }
 }
