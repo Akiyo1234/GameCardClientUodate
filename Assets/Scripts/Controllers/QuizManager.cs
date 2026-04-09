@@ -49,6 +49,8 @@ public class QuizManager : MonoBehaviour
 
     private List<PlayerAnswer> currentAnswers = new List<PlayerAnswer>();
 
+    public bool IsQuizActive => isQuizActive;
+
     void Awake()
     {
         if (Instance != null && Instance != this) {
@@ -105,6 +107,7 @@ public class QuizManager : MonoBehaviour
         currentAnswers.Clear();
         currentTime = timeLimit;
         isQuizActive = true;
+        if (gameController != null) gameController.SetGameplayInputLocked(true);
         if (quizPanel != null) quizPanel.SetActive(true);
         
         if (rewardText != null) {
@@ -172,6 +175,7 @@ public class QuizManager : MonoBehaviour
     private void ForceEndQuiz()
     {
         isQuizActive = false;
+        if (gameController != null) gameController.SetGameplayInputLocked(false);
         if (quizPanel != null) quizPanel.SetActive(false);
 
         if (currentAnswers.Count == 0)

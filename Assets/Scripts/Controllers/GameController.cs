@@ -62,6 +62,7 @@ public class GameController : MonoBehaviour
     private BotController botController;
     private Coroutine botTurnCoroutine;
     private bool isExecutingBotTurn;
+    private bool isGameplayInputLocked;
 
     void Awake()
     {
@@ -196,6 +197,7 @@ public class GameController : MonoBehaviour
         if (isGameOver) return;
         if (players == null || players.Length == 0) return;
         if (playOrder == null || playOrder.Length == 0) return;
+        if (isGameplayInputLocked) return;
 
         if (currentTurnTime > 0) 
         {
@@ -229,6 +231,32 @@ public class GameController : MonoBehaviour
         ScheduleBotTurnIfNeeded();
     }
 
+    public void SetGameplayInputLocked(bool locked)
+    {
+        isGameplayInputLocked = locked;
+
+        if (locked)
+        {
+            pendingReserveCard = null;
+            if (confirmReservePanel != null) confirmReservePanel.SetActive(false);
+            System.Array.Clear(pendingCoins, 0, 6);
+            foreach (var btn in bankButtons) if (btn != null) btn.UpdatePendingUI(0);
+        }
+    }
+
+    public bool IsGameplayInputLocked()
+    {
+        return isGameplayInputLocked;
+    }
+
+    private bool BlockActionDuringQuiz()
+    {
+        if (!isGameplayInputLocked) return false;
+
+        ShowWarning("กรุณาตอบคำถามก่อน จึงจะกดปุ่มอื่นได้");
+        return true;
+    }
+
     public void ShowWarning(string msg)
     {
         if (warningText != null) warningText.text = msg; 
@@ -252,6 +280,7 @@ public class GameController : MonoBehaviour
 
     public void ClearPendingCoins() 
     {
+        if (BlockActionDuringQuiz()) return;
         System.Array.Clear(pendingCoins, 0, 6); 
         foreach (var btn in bankButtons) if (btn != null) btn.UpdatePendingUI(0);
         ClearWarning(); 
@@ -273,6 +302,7 @@ public class GameController : MonoBehaviour
 
     public void OnResourceClicked(ResourceButton clickedBtn)
     {
+        if (BlockActionDuringQuiz()) return;
         if (isGameOver) return; 
         if (IsCurrentPlayerBot() && !isExecutingBotTurn) {
             ShowWarning("กำลังเป็นเทิร์นของบอท");
@@ -336,6 +366,7 @@ public class GameController : MonoBehaviour
 
     public void OnCardClicked(CardDisplay card)
     {
+        if (BlockActionDuringQuiz()) return;
         if (isGameOver) return; 
         if (IsCurrentPlayerBot() && !isExecutingBotTurn) {
             ShowWarning("กำลังเป็นเทิร์นของบอท");
@@ -394,6 +425,7 @@ public class GameController : MonoBehaviour
 
     public void PromptReserveCard(CardDisplay card)
     {
+        if (BlockActionDuringQuiz()) return;
         if (isGameOver) return;
         if (IsCurrentPlayerBot() && !isExecutingBotTurn) {
             ShowWarning("กำลังเป็นเทิร์นของบอท");
@@ -418,6 +450,7 @@ public class GameController : MonoBehaviour
 
     public void ConfirmReserve()
     {
+        if (BlockActionDuringQuiz()) return;
         if (confirmReservePanel != null) confirmReservePanel.SetActive(false);
         if (pendingReserveCard != null) {
             ExecuteReserve(pendingReserveCard);
@@ -427,6 +460,7 @@ public class GameController : MonoBehaviour
 
     public void CancelReserve()
     {
+        if (BlockActionDuringQuiz()) return;
         if (confirmReservePanel != null) confirmReservePanel.SetActive(false);
         pendingReserveCard = null;
     }
@@ -468,6 +502,7 @@ public class GameController : MonoBehaviour
 
     public void BuyReservedCard(CardDisplay card)
     {
+        if (BlockActionDuringQuiz()) return;
         if (isGameOver) return;
         
         PlayerUI p = players[playOrder[currentPlayerIndex]]; // เปลี่ยนเป็นเช็คคนเล่นตามคิว
@@ -526,6 +561,7 @@ public class GameController : MonoBehaviour
 
     public void EndTurn()
     {
+        if (BlockActionDuringQuiz()) return;
         if (isGameOver) return;
 
         if (GetTotalPendingCoins() > 0) {
