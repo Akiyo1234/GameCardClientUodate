@@ -257,6 +257,24 @@ public class GameController : MonoBehaviour
         return true;
     }
 
+    private bool IsLocalPlayersTurn()
+    {
+        if (players == null || players.Length == 0) return false;
+        if (players[0] == null || players[0].isBot) return false;
+        if (playOrder == null || playOrder.Length == 0) return false;
+        if (currentPlayerIndex < 0 || currentPlayerIndex >= playOrder.Length) return false;
+
+        return playOrder[currentPlayerIndex] == 0;
+    }
+
+    private bool BlockActionOutsideLocalTurn()
+    {
+        if (IsLocalPlayersTurn()) return false;
+
+        ShowWarning("กดปุ่มได้เฉพาะในเทิร์นของคุณ");
+        return true;
+    }
+
     public void ShowWarning(string msg)
     {
         if (warningText != null) warningText.text = msg; 
@@ -281,6 +299,7 @@ public class GameController : MonoBehaviour
     public void ClearPendingCoins() 
     {
         if (BlockActionDuringQuiz()) return;
+        if (BlockActionOutsideLocalTurn()) return;
         System.Array.Clear(pendingCoins, 0, 6); 
         foreach (var btn in bankButtons) if (btn != null) btn.UpdatePendingUI(0);
         ClearWarning(); 
@@ -303,6 +322,7 @@ public class GameController : MonoBehaviour
     public void OnResourceClicked(ResourceButton clickedBtn)
     {
         if (BlockActionDuringQuiz()) return;
+        if (BlockActionOutsideLocalTurn()) return;
         if (isGameOver) return; 
         if (IsCurrentPlayerBot() && !isExecutingBotTurn) {
             ShowWarning("กำลังเป็นเทิร์นของบอท");
@@ -367,6 +387,7 @@ public class GameController : MonoBehaviour
     public void OnCardClicked(CardDisplay card)
     {
         if (BlockActionDuringQuiz()) return;
+        if (BlockActionOutsideLocalTurn()) return;
         if (isGameOver) return; 
         if (IsCurrentPlayerBot() && !isExecutingBotTurn) {
             ShowWarning("กำลังเป็นเทิร์นของบอท");
@@ -426,6 +447,7 @@ public class GameController : MonoBehaviour
     public void PromptReserveCard(CardDisplay card)
     {
         if (BlockActionDuringQuiz()) return;
+        if (BlockActionOutsideLocalTurn()) return;
         if (isGameOver) return;
         if (IsCurrentPlayerBot() && !isExecutingBotTurn) {
             ShowWarning("กำลังเป็นเทิร์นของบอท");
@@ -451,6 +473,7 @@ public class GameController : MonoBehaviour
     public void ConfirmReserve()
     {
         if (BlockActionDuringQuiz()) return;
+        if (BlockActionOutsideLocalTurn()) return;
         if (confirmReservePanel != null) confirmReservePanel.SetActive(false);
         if (pendingReserveCard != null) {
             ExecuteReserve(pendingReserveCard);
@@ -461,6 +484,7 @@ public class GameController : MonoBehaviour
     public void CancelReserve()
     {
         if (BlockActionDuringQuiz()) return;
+        if (BlockActionOutsideLocalTurn()) return;
         if (confirmReservePanel != null) confirmReservePanel.SetActive(false);
         pendingReserveCard = null;
     }
@@ -503,6 +527,7 @@ public class GameController : MonoBehaviour
     public void BuyReservedCard(CardDisplay card)
     {
         if (BlockActionDuringQuiz()) return;
+        if (BlockActionOutsideLocalTurn()) return;
         if (isGameOver) return;
         
         PlayerUI p = players[playOrder[currentPlayerIndex]]; // เปลี่ยนเป็นเช็คคนเล่นตามคิว
@@ -562,6 +587,7 @@ public class GameController : MonoBehaviour
     public void EndTurn()
     {
         if (BlockActionDuringQuiz()) return;
+        if (BlockActionOutsideLocalTurn()) return;
         if (isGameOver) return;
 
         if (GetTotalPendingCoins() > 0) {
