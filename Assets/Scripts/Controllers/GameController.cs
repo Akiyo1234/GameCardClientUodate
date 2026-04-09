@@ -269,6 +269,7 @@ public class GameController : MonoBehaviour
 
     private bool BlockActionOutsideLocalTurn()
     {
+        if (IsCurrentPlayerBot() || isExecutingBotTurn) return false;
         if (IsLocalPlayersTurn()) return false;
 
         ShowWarning("กดปุ่มได้เฉพาะในเทิร์นของคุณ");
@@ -474,6 +475,10 @@ public class GameController : MonoBehaviour
     {
         if (BlockActionDuringQuiz()) return;
         if (BlockActionOutsideLocalTurn()) return;
+        if (IsCurrentPlayerBot() && !isExecutingBotTurn) {
+            ShowWarning("กำลังเป็นเทิร์นของบอท");
+            return;
+        }
         if (confirmReservePanel != null) confirmReservePanel.SetActive(false);
         if (pendingReserveCard != null) {
             ExecuteReserve(pendingReserveCard);
@@ -485,6 +490,10 @@ public class GameController : MonoBehaviour
     {
         if (BlockActionDuringQuiz()) return;
         if (BlockActionOutsideLocalTurn()) return;
+        if (IsCurrentPlayerBot() && !isExecutingBotTurn) {
+            ShowWarning("กำลังเป็นเทิร์นของบอท");
+            return;
+        }
         if (confirmReservePanel != null) confirmReservePanel.SetActive(false);
         pendingReserveCard = null;
     }
