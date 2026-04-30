@@ -3676,6 +3676,7 @@ GameObject:
   - component: {fileID: 314157366}
   - component: {fileID: 314157365}
   - component: {fileID: 314157367}
+  - component: {fileID: 314157368}
   m_Layer: 0
   m_Name: GameManager
   m_TagString: Untagged
@@ -3758,6 +3759,7 @@ MonoBehaviour:
   turnCountText: {fileID: 1054391317}
   resultScreen: {fileID: 1638741763}
   confirmReservePanel: {fileID: 135910091}
+  botTurnDelay: 0.75
   availableCharacters:
   - {fileID: 11400000, guid: 9155f8821ad269e44b848bb18acffad3, type: 2}
   - {fileID: 11400000, guid: 471915ed6b59a174b9b2b6309f7407cc, type: 2}
@@ -3818,6 +3820,18 @@ MonoBehaviour:
   rewardText: {fileID: 708983426}
   resultScreen: {fileID: 1638741763}
   timeLimit: 10
+--- !u!114 &314157368
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 314157364}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1712d8266472e2e429f17ea5f4e8f83e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::BotController
 --- !u!1001 &332397519
 PrefabInstance:
   m_ObjectHideFlags: 0

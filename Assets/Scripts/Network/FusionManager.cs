@@ -3,6 +3,7 @@ using Fusion;
 using Fusion.Sockets;
 using System.Collections.Generic;
 using System;
+using System.IO;
 using UnityEngine.SceneManagement;
 
 public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
@@ -26,6 +27,16 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     // เช็คว่าเป็นเจ้าของห้อง (Master Client) หรือไม่
     public bool IsMasterClient => _runner != null && _runner.IsServer;
 
+    public void StartMatchedGame(string roomCode, string sceneName = null)
+    {
+        if (!string.IsNullOrWhiteSpace(sceneName))
+        {
+            gameSceneName = sceneName;
+        }
+
+        StartGame(GameMode.AutoHostOrClient, roomCode);
+    }
+
     public async void StartGame(GameMode mode, string roomName)
     {
         if (_runner == null) {
@@ -37,7 +48,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         var result = await _runner.StartGame(new StartGameArgs() {
             GameMode = mode,
             SessionName = roomName,
-            Scene = SceneRef.FromIndex(SceneManager.GetActiveScene().buildIndex),
+            Scene = ResolveSceneRef(),
             SceneManager = gameObject.AddComponent<NetworkSceneManagerDefault>()
         });
 
@@ -105,4 +116,36 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     public void OnSceneLoadStart(NetworkRunner runner) { }
     public void OnObjectEnterAOI(NetworkRunner runner, NetworkObject obj, PlayerRef player) { }
     public void OnObjectExitAOI(NetworkRunner runner, NetworkObject obj, PlayerRef player) { }
+
+    private SceneRef ResolveSceneRef()
+    {
+        var buildIndex = FindBuildIndexByName(gameSceneName);
+        if (buildIndex >= 0)
+        {
+            return SceneRef.FromIndex(buildIndex);
+        }
+
+        return SceneRef.FromIndex(SceneManager.GetActiveScene().buildIndex);
+    }
+
+    private static int FindBuildIndexByName(string sceneName)
+    {
+        if (string.IsNullOrWhiteSpace(sceneName))
+        {
+            return -1;
+        }
+
+        for (var i = 0; i < SceneManager.sceneCountInBuildSettings; i++)
+        {
+            var scenePath = SceneUtility.GetScenePathByBuildIndex(i);
+            var buildSceneName = Path.GetFileNameWithoutExtension(scenePath);
+
+            if (string.Equals(buildSceneName, sceneName, StringComparison.OrdinalIgnoreCase))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
 }
