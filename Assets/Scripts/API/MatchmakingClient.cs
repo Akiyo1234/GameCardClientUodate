@@ -38,6 +38,8 @@ public class MatchmakingClient : MonoBehaviour
         _isConnectingToFusion = false;
         ClearSavedMatch();
 
+        Debug.Log($"[Matchmaking] FindMatch pressed. PlayerId={_currentPlayerId}");
+
         if (_pollCoroutine != null)
         {
             StopCoroutine(_pollCoroutine);
@@ -54,6 +56,8 @@ public class MatchmakingClient : MonoBehaviour
         _isConnectingToFusion = false;
         ClearSavedMatch();
 
+        Debug.Log($"[Matchmaking] CancelMatchmaking pressed. PlayerId={_currentPlayerId}");
+
         if (_pollCoroutine != null)
         {
             StopCoroutine(_pollCoroutine);
@@ -67,6 +71,7 @@ public class MatchmakingClient : MonoBehaviour
     public void PollMatchStatus()
     {
         _currentPlayerId = GetOrCreatePlayerId();
+        Debug.Log($"[Matchmaking] Manual poll requested. PlayerId={_currentPlayerId}");
         StartCoroutine(PollMatchStatusOnceCoroutine());
     }
 
@@ -153,6 +158,8 @@ public class MatchmakingClient : MonoBehaviour
         var insertResponse = await client.From<MatchmakingQueueData>().Insert(queueEntry);
         var createdEntry = insertResponse.Models.FirstOrDefault() ?? queueEntry;
 
+        Debug.Log($"[Matchmaking] Queue entry created. Id={createdEntry.Id}, PlayerId={createdEntry.PlayerId}, Status={createdEntry.Status}");
+
         return await TryCreateMatchAsync(client, createdEntry);
     }
 
@@ -179,8 +186,11 @@ public class MatchmakingClient : MonoBehaviour
         var latestEntry = await GetLatestQueueEntryAsync(client);
         if (latestEntry == null)
         {
+            Debug.LogWarning($"[Matchmaking] No queue entry found for PlayerId={_currentPlayerId}");
             return null;
         }
+
+        Debug.Log($"[Matchmaking] Latest queue entry. Id={latestEntry.Id}, Status={latestEntry.Status}, RoomCode={latestEntry.RoomCode}");
 
         if (latestEntry.Status == WaitingStatus)
         {
@@ -211,6 +221,7 @@ public class MatchmakingClient : MonoBehaviour
 
         if (waitingEntries.Count < 2)
         {
+            Debug.Log($"[Matchmaking] Waiting for more players. Current waiting count={waitingEntries.Count}");
             return await GetLatestQueueEntryAsync(client);
         }
 
@@ -219,11 +230,13 @@ public class MatchmakingClient : MonoBehaviour
 
         if (firstEntry.Id != currentEntry.Id)
         {
+            Debug.Log($"[Matchmaking] Another player is first in queue. CurrentEntry={currentEntry.Id}, FirstEntry={firstEntry.Id}");
             return await GetLatestQueueEntryAsync(client);
         }
 
         if (string.Equals(firstEntry.PlayerId, secondEntry.PlayerId, StringComparison.OrdinalIgnoreCase))
         {
+            Debug.LogWarning("[Matchmaking] Duplicate waiting player detected in top queue entries.");
             return await GetLatestQueueEntryAsync(client);
         }
 
@@ -242,6 +255,8 @@ public class MatchmakingClient : MonoBehaviour
 
         await client.From<MatchmakingQueueData>().Update(firstEntry);
         await client.From<MatchmakingQueueData>().Update(secondEntry);
+
+        Debug.Log($"[Matchmaking] Match created. RoomCode={roomCode}, PlayerA={firstEntry.PlayerId}, PlayerB={secondEntry.PlayerId}");
 
         return string.Equals(_currentPlayerId, firstEntry.PlayerId, StringComparison.OrdinalIgnoreCase)
             ? firstEntry
@@ -271,6 +286,7 @@ public class MatchmakingClient : MonoBehaviour
         {
             entry.Status = CancelledStatus;
             await client.From<MatchmakingQueueData>().Update(entry);
+            Debug.Log($"[Matchmaking] Queue entry cancelled. Id={entry.Id}, PlayerId={entry.PlayerId}");
         }
     }
 
@@ -310,10 +326,12 @@ public class MatchmakingClient : MonoBehaviour
 
         if (FusionManager.Instance != null)
         {
+            Debug.Log($"[Matchmaking] Connecting to Fusion with roomCode={entry.RoomCode}");
             FusionManager.Instance.StartMatchedGame(entry.RoomCode, gameSceneName);
             return;
         }
 
+        Debug.Log($"[Matchmaking] FusionManager not found. Loading scene {gameSceneName} only.");
         SceneManager.LoadScene(gameSceneName);
     }
 
