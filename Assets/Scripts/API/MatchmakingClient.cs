@@ -221,6 +221,7 @@ public class MatchmakingClient : MonoBehaviour
             .Get();
 
         var waitingEntries = waitingResponse.Models
+            .Where(IsWaitingEntry)
             .OrderBy(x => x.CreatedAt)
             .ThenBy(x => x.Id)
             .ToList();
@@ -228,7 +229,7 @@ public class MatchmakingClient : MonoBehaviour
         if (waitingEntries.Count < 2)
         {
             Debug.Log($"[Matchmaking] Waiting for more players. Current waiting count={waitingEntries.Count}");
-            return await GetLatestQueueEntryAsync(client);
+            return await GetLatestWaitingQueueEntryAsync(client) ?? await GetLatestQueueEntryAsync(client);
         }
 
         var firstEntry = waitingEntries[0];
@@ -237,13 +238,19 @@ public class MatchmakingClient : MonoBehaviour
         if (firstEntry.Id != currentEntry.Id)
         {
             Debug.Log($"[Matchmaking] Another player is first in queue. CurrentEntry={currentEntry.Id}, FirstEntry={firstEntry.Id}");
-            return await GetLatestQueueEntryAsync(client);
+            return await GetLatestWaitingQueueEntryAsync(client) ?? await GetLatestQueueEntryAsync(client);
         }
 
         if (string.Equals(firstEntry.PlayerId, secondEntry.PlayerId, StringComparison.OrdinalIgnoreCase))
         {
             Debug.LogWarning("[Matchmaking] Duplicate waiting player detected in top queue entries.");
-            return await GetLatestQueueEntryAsync(client);
+            return await GetLatestWaitingQueueEntryAsync(client) ?? await GetLatestQueueEntryAsync(client);
+        }
+
+        if (!IsWaitingEntry(firstEntry) || !IsWaitingEntry(secondEntry))
+        {
+            Debug.LogWarning("[Matchmaking] Match creation skipped because one of the top queue entries is no longer waiting.");
+            return await GetLatestWaitingQueueEntryAsync(client) ?? await GetLatestQueueEntryAsync(client);
         }
 
         var roomCode = GenerateRoomCode();
@@ -274,6 +281,18 @@ public class MatchmakingClient : MonoBehaviour
         var response = await client
             .From<MatchmakingQueueData>()
             .Where(x => x.PlayerId == _currentPlayerId)
+            .Order(x => x.CreatedAt, Postgrest.Constants.Ordering.Descending)
+            .Limit(1)
+            .Get();
+
+        return response.Models.FirstOrDefault();
+    }
+
+    private async Task<MatchmakingQueueData> GetLatestWaitingQueueEntryAsync(Supabase.Client client)
+    {
+        var response = await client
+            .From<MatchmakingQueueData>()
+            .Where(x => x.PlayerId == _currentPlayerId && x.Status == WaitingStatus)
             .Order(x => x.CreatedAt, Postgrest.Constants.Ordering.Descending)
             .Limit(1)
             .Get();
@@ -388,6 +407,12 @@ public class MatchmakingClient : MonoBehaviour
     private static string GenerateRoomCode()
     {
         return Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+    }
+
+    private static bool IsWaitingEntry(MatchmakingQueueData entry)
+    {
+        return entry != null &&
+               string.Equals(entry.Status, WaitingStatus, StringComparison.OrdinalIgnoreCase);
     }
 
     private Supabase.Client GetSupabaseClient()
