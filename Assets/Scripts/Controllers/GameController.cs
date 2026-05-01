@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
 using TMPro; 
@@ -7,6 +7,7 @@ public class GameController : MonoBehaviour
 {
     private const int MaxRemoteHumanSlots = 3;
     private const int OnlineHumanPlayerCount = 2;
+    private const string MatchmakingRoomCodePrefsKey = "MatchmakingRoomCode";
 
     [Header("---- Board & Prefabs ----")]
     public Transform tier3Container; 
@@ -69,18 +70,20 @@ public class GameController : MonoBehaviour
     private bool isWaitingForContinueAfterResult;
     private bool isOnlineMatchMode;
     private int activePlayerCount = 4;
+    private bool hasStartedInitialGameplay;
 
     public bool IsOnlineMatchMode => isOnlineMatchMode;
     public int ActivePlayerCount => activePlayerCount;
 
     void Awake()
     {
-        isOnlineMatchMode = FusionManager.Instance != null && FusionManager.Instance.ActivePlayerCount >= 2;
+        isOnlineMatchMode = IsMatchedOnlineSession();
         activePlayerCount = isOnlineMatchMode ? OnlineHumanPlayerCount : 4;
 
         if (FusionManager.Instance != null)
         {
             FusionManager.Instance.PlayerNamesUpdated += ApplyNetworkPlayerNamesToUi;
+            FusionManager.Instance.ActivePlayersChanged += HandleFusionActivePlayersChanged;
         }
 
         EnsureBotController();
@@ -150,11 +153,31 @@ public class GameController : MonoBehaviour
     void Start()
     {
         ApplyNetworkPlayerNamesToUi();
-        UpdateTurnCountUI(); // อัปเดตเลขเทิร์นเริ่มต้น (เทิร์นที่ 1)
+        UpdateTurnCountUI();
 
-        // ย้ายการเรียกควิซมาที่ Start เพื่อให้แน่ใจว่า QuizManager พร้อมทำงานแล้ว
-        if (QuizManager.Instance != null) {
-            Debug.Log("<color=cyan>[GameController] เริ่มเกมรอบแรก -> เรียกควิซตัดสินลำดับการเล่นทันที!</color>");
+        if (ShouldWaitForOnlineOpponent())
+        {
+            ShowWarning("Waiting for opponent...");
+            Debug.Log("[GameController] Waiting for the second online player to join before starting gameplay.");
+            return;
+        }
+
+        StartInitialGameplay();
+    }
+
+    private void StartInitialGameplay()
+    {
+        if (hasStartedInitialGameplay)
+        {
+            return;
+        }
+
+        hasStartedInitialGameplay = true;
+        ClearWarning();
+
+        if (QuizManager.Instance != null)
+        {
+            Debug.Log("[GameController] Starting first-round quiz.");
             QuizManager.Instance.StartQuiz();
         }
         else
@@ -168,7 +191,49 @@ public class GameController : MonoBehaviour
         if (FusionManager.Instance != null)
         {
             FusionManager.Instance.PlayerNamesUpdated -= ApplyNetworkPlayerNamesToUi;
+            FusionManager.Instance.ActivePlayersChanged -= HandleFusionActivePlayersChanged;
         }
+    }
+
+    private bool IsMatchedOnlineSession()
+    {
+        if (!string.IsNullOrWhiteSpace(PlayerPrefs.GetString(MatchmakingRoomCodePrefsKey, string.Empty)))
+        {
+            return true;
+        }
+
+        return FusionManager.Instance != null && FusionManager.Instance.ActivePlayerCount >= 2;
+    }
+
+    private bool ShouldWaitForOnlineOpponent()
+    {
+        return isOnlineMatchMode && FusionManager.Instance != null && FusionManager.Instance.ActivePlayerCount < OnlineHumanPlayerCount;
+    }
+
+    private void HandleFusionActivePlayersChanged()
+    {
+        isOnlineMatchMode = IsMatchedOnlineSession();
+        activePlayerCount = isOnlineMatchMode ? OnlineHumanPlayerCount : 4;
+
+        if (!isOnlineMatchMode)
+        {
+            return;
+        }
+
+        SetupPlayers();
+        ConfigureBankCoinsByPlayerCount();
+        UpdateBankUI();
+        UpdateTurnVisuals();
+        ApplyNetworkPlayerNamesToUi();
+
+        if (ShouldWaitForOnlineOpponent())
+        {
+            ShowWarning("Waiting for opponent...");
+            return;
+        }
+
+        Debug.Log("[GameController] Online players ready. Refreshing PvP setup.");
+        StartInitialGameplay();
     }
 
     void SetupNobles()

@@ -13,6 +13,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
 {
     public static FusionManager Instance { get; private set; }
     public event Action PlayerNamesUpdated;
+    public event Action ActivePlayersChanged;
 
     private const char PlayerNameSeparator = '|';
     private NetworkRunner _runner;
@@ -104,6 +105,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         }
 
         RefreshPlayerList(runner);
+        NotifyActivePlayersChanged();
     }
 
     public void OnPlayerLeft(NetworkRunner runner, PlayerRef player)
@@ -114,6 +116,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
             NotifyPlayerNamesUpdated();
         }
         RefreshPlayerList(runner);
+        NotifyActivePlayersChanged();
     }
 
     private void RefreshPlayerList(NetworkRunner runner)
@@ -142,6 +145,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         {
             CleanupRunnerComponents();
         }
+        NotifyActivePlayersChanged();
     }
 
     public void OnConnectedToServer(NetworkRunner runner)
@@ -340,6 +344,11 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     private void NotifyPlayerNamesUpdated()
     {
         PlayerNamesUpdated?.Invoke();
+    }
+
+    private void NotifyActivePlayersChanged()
+    {
+        ActivePlayersChanged?.Invoke();
     }
 
     private static byte[] EncodePlayerNamePayload(int playerId, string playerName)
