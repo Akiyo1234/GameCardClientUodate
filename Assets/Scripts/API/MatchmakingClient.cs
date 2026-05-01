@@ -114,7 +114,7 @@ public class MatchmakingClient : MonoBehaviour
 
         if (!TryGetTaskResult(task, out var entry) || entry == null)
         {
-            return;
+            yield break;
         }
 
         HandleQueueEntry(entry);
