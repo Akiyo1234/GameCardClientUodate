@@ -148,7 +148,10 @@ public class QuizManager : MonoBehaviour
         yield return new WaitForSeconds(1.0f);
         
         // จำลองบอทตอบ (ถ้าต้องการความรวดเร็วให้ใช้ค่าสั้นๆ)
-        SimulateOtherPlayers(gameController != null ? gameController.playOrder[gameController.currentPlayerIndex] : 0);
+        if (gameController == null || !gameController.IsOnlineMatchMode)
+        {
+            SimulateOtherPlayers(gameController != null ? gameController.playOrder[gameController.currentPlayerIndex] : 0);
+        }
         
         ForceEndQuiz();
     }
@@ -156,7 +159,8 @@ public class QuizManager : MonoBehaviour
 
     private void SimulateOtherPlayers(int excludeIndex)
     {
-        for (int i = 0; i < 4; i++)
+        int totalPlayers = GetTotalPlayersForQuiz();
+        for (int i = 0; i < totalPlayers; i++)
         {
             if (i == excludeIndex) continue; // ข้ามตัวเราเอง
 
@@ -288,9 +292,9 @@ public class QuizManager : MonoBehaviour
 
     private int GetTotalPlayersForQuiz()
     {
-        if (gameController != null && gameController.players != null && gameController.players.Length > 0)
+        if (gameController != null)
         {
-            return gameController.players.Length;
+            return gameController.ActivePlayerCount;
         }
 
         return 4;

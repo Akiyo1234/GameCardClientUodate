@@ -6,6 +6,7 @@ using TMPro;
 public class GameController : MonoBehaviour
 {
     private const int MaxRemoteHumanSlots = 3;
+    private const int OnlineHumanPlayerCount = 2;
 
     [Header("---- Board & Prefabs ----")]
     public Transform tier3Container; 
@@ -66,9 +67,17 @@ public class GameController : MonoBehaviour
     private bool isExecutingBotTurn;
     private bool isGameplayInputLocked;
     private bool isWaitingForContinueAfterResult;
+    private bool isOnlineMatchMode;
+    private int activePlayerCount = 4;
+
+    public bool IsOnlineMatchMode => isOnlineMatchMode;
+    public int ActivePlayerCount => activePlayerCount;
 
     void Awake()
     {
+        isOnlineMatchMode = FusionManager.Instance != null && FusionManager.Instance.ActivePlayerCount >= 2;
+        activePlayerCount = isOnlineMatchMode ? OnlineHumanPlayerCount : 4;
+
         if (FusionManager.Instance != null)
         {
             FusionManager.Instance.PlayerNamesUpdated += ApplyNetworkPlayerNamesToUi;
@@ -681,7 +690,7 @@ public class GameController : MonoBehaviour
         
         bool isNewRound = false;
         bool startedQuizThisTurn = false;
-        if (currentPlayerIndex >= players.Length) {
+        if (currentPlayerIndex >= activePlayerCount) {
             currentPlayerIndex = 0;
             currentRound++;
             isNewRound = true; // ระบุว่ากำลังขึ้นรอบใหม่
@@ -714,7 +723,7 @@ public class GameController : MonoBehaviour
         PlayerUI winner = null; 
         int highestScore = 0;
         
-        for (int i = 0; i < players.Length; i++) {
+        for (int i = 0; i < activePlayerCount; i++) {
             if (players[i].currentScore >= winningScore && players[i].currentScore > highestScore) {
                 highestScore = players[i].currentScore; 
                 winner = players[i];
@@ -743,7 +752,13 @@ public class GameController : MonoBehaviour
             if (resultScreen != null)
             {
                 List<string> rankings = new List<string>();
-                foreach (var p in players) rankings.Add($"{p.nameText.text} : {p.currentScore} แต้ม");
+                for (int i = 0; i < activePlayerCount; i++)
+                {
+                    if (players[i] != null)
+                    {
+                        rankings.Add($"{players[i].nameText.text} : {players[i].currentScore} แต้ม");
+                    }
+                }
                 
                 resultScreen.ShowResults("เกมจบแล้ว! ผู้ชนะคือ " + winner.nameText.text, rankings, true);
             }
@@ -752,7 +767,10 @@ public class GameController : MonoBehaviour
                 ShowWarning($"ผู้ชนะคือ {winner.nameText.text} {highestScore} แต้ม!");
             }
             
-            foreach (var p in players) p.UpdateTimerBar(0); 
+            for (int i = 0; i < activePlayerCount; i++)
+            {
+                if (players[i] != null) players[i].UpdateTimerBar(0);
+            }
         }
     }
 
@@ -802,12 +820,14 @@ public class GameController : MonoBehaviour
 
     void EnsureBotController()
     {
+        if (isOnlineMatchMode) return;
         if (botController == null) botController = GetComponent<BotController>();
         if (botController == null) botController = gameObject.AddComponent<BotController>();
     }
 
     bool IsCurrentPlayerBot()
     {
+        if (isOnlineMatchMode) return false;
         if (players == null || players.Length == 0) return false;
         if (playOrder == null || playOrder.Length == 0) return false;
         if (currentPlayerIndex < 0 || currentPlayerIndex >= playOrder.Length) return false;
@@ -820,6 +840,7 @@ public class GameController : MonoBehaviour
 
     void ScheduleBotTurnIfNeeded()
     {
+        if (isOnlineMatchMode) return;
         if (botTurnCoroutine != null) {
             StopCoroutine(botTurnCoroutine);
             botTurnCoroutine = null;
@@ -850,6 +871,11 @@ public class GameController : MonoBehaviour
 
     int GetConfiguredPlayerCount()
     {
+        if (isOnlineMatchMode)
+        {
+            return OnlineHumanPlayerCount;
+        }
+
         if (players == null || players.Length == 0) return 4;
 
         int count = 0;
@@ -909,17 +935,33 @@ public class GameController : MonoBehaviour
         remainingChars.Remove(p1Data);
 
         int humanPlayerCount = 1;
-        if (FusionManager.Instance != null && FusionManager.Instance.ActivePlayerCount >= 2)
+        if (isOnlineMatchMode)
         {
-            humanPlayerCount = Mathf.Clamp(FusionManager.Instance.ActivePlayerCount, 2, players.Length);
-            Debug.Log($"[GameController] Multiplayer room detected. Human player count={humanPlayerCount}");
+            humanPlayerCount = Mathf.Min(OnlineHumanPlayerCount, players.Length);
+            activePlayerCount = humanPlayerCount;
+            playOrder = new int[] { 0, 1 };
+            currentPlayerIndex = 0;
+            Debug.Log($"[GameController] Online PvP mode detected. Human player count={humanPlayerCount}, bots disabled.");
+        }
+        else
+        {
+            activePlayerCount = Mathf.Clamp(players.Length, 2, 4);
         }
 
         for (int i = 0; i < players.Length; i++) 
         {
             if (players[i] != null) 
             {
-                players[i].isBot = (i >= humanPlayerCount); 
+                bool isActiveSeat = i < activePlayerCount;
+                players[i].gameObject.SetActive(isActiveSeat);
+
+                if (!isActiveSeat)
+                {
+                    players[i].isBot = false;
+                    continue;
+                }
+
+                players[i].isBot = !isOnlineMatchMode && (i >= humanPlayerCount); 
                 string finalName = "Player " + (i + 1); // บังคับเป็น Player 1, 2, 3, 4 ไว้ก่อน
 
                 if (!players[i].isBot) {
