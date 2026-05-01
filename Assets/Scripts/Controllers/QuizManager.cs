@@ -281,25 +281,7 @@ public class QuizManager : MonoBehaviour
             newTurnOrder[i] = rankedPlayers[i].playerIndex;
         }
 
-        if (resultScreen != null && gameController != null)
-        {
-            gameController.SetWaitingForContinueAfterResult(true);
-        }
-
         gameController?.ApplyNewTurnOrder(newTurnOrder);
-
-        if (resultScreen != null)
-        {
-            List<string> rankings = new List<string>();
-            foreach (PlayerAnswer answer in rankedPlayers)
-            {
-                string playerName = GetPlayerName(answer.playerIndex);
-                string status = answer.isCorrect ? "ถูก" : "ผิด";
-                rankings.Add($"{playerName} ({status} - {answer.timeTaken:F2}s)");
-            }
-
-            resultScreen.ShowResults("สรุปลำดับการเล่นรอบนี้", rankings, false, hasWinner);
-        }
     }
 
     private void StartQuizInternal(int questionIndex)
@@ -343,7 +325,7 @@ public class QuizManager : MonoBehaviour
     {
         isQuizActive = false;
         isWaitingForOnlineResults = false;
-        if (gameController != null) gameController.SetGameplayInputLocked(true);
+        if (gameController != null) gameController.SetGameplayInputLocked(false);
         if (quizPanel != null) quizPanel.SetActive(false);
         if (timerText != null) timerText.text = string.Empty;
     }
