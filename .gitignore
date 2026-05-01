@@ -8,6 +8,7 @@
 /[Oo]bj/
 /[Bb]uild/
 /[Bb]uilds/
+/Build_Windows/
 /[Ll]ogs/
 /[Uu]ser[Ss]ettings/
 *.log

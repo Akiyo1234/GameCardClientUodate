@@ -192,7 +192,39 @@ public class QuizManager : MonoBehaviour
     // =====================================
     public void ProcessQuizResults(List<PlayerAnswer> answers)
     {
-        var rankedPlayers = answers
+        int totalPlayers = GetTotalPlayersForQuiz();
+        if (totalPlayers <= 0)
+        {
+            Debug.LogWarning("[Quiz] No players available to rank.");
+            return;
+        }
+
+        var normalizedAnswers = answers
+            .Where(a => a != null)
+            .GroupBy(a => a.playerIndex)
+            .Select(group => group
+                .OrderByDescending(a => a.isCorrect)
+                .ThenBy(a => a.timeTaken)
+                .First())
+            .ToList();
+
+        for (int i = 0; i < totalPlayers; i++)
+        {
+            bool alreadyAnswered = normalizedAnswers.Any(a => a.playerIndex == i);
+            if (alreadyAnswered)
+            {
+                continue;
+            }
+
+            normalizedAnswers.Add(new PlayerAnswer
+            {
+                playerIndex = i,
+                isCorrect = false,
+                timeTaken = timeLimit + 999f
+            });
+        }
+
+        var rankedPlayers = normalizedAnswers
             .OrderByDescending(a => a.isCorrect)
             .ThenBy(a => a.timeTaken)
             .ToList();
@@ -223,8 +255,8 @@ public class QuizManager : MonoBehaviour
             if (rewardText != null) rewardText.text = "ไม่มีใครตอบถูกเลย!";
         }
 
-        int[] newTurnOrder = new int[4];
-        for (int i = 0; i < 4; i++)
+        int[] newTurnOrder = new int[totalPlayers];
+        for (int i = 0; i < totalPlayers; i++)
         {
             newTurnOrder[i] = rankedPlayers[i].playerIndex;
         }
@@ -252,6 +284,16 @@ public class QuizManager : MonoBehaviour
 
             resultScreen.ShowResults("สรุปลำดับการเล่นรอบนี้", rankings, false, hasWinner);
         }
+    }
+
+    private int GetTotalPlayersForQuiz()
+    {
+        if (gameController != null && gameController.players != null && gameController.players.Length > 0)
+        {
+            return gameController.players.Length;
+        }
+
+        return 4;
     }
 
     private string GiveRandomGems(int playerIndex, int amount)
