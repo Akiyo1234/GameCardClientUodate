@@ -71,6 +71,20 @@ public class GameController : MonoBehaviour
     private int activePlayerCount = 4;
     private bool hasStartedInitialGameplay;
     private int localPlayerSlotIndex;
+    private bool playerPanelLayoutsCaptured;
+    private PlayerPanelLayout[] capturedPlayerPanelLayouts;
+
+    private struct PlayerPanelLayout
+    {
+        public Vector2 AnchoredPosition;
+        public Vector2 SizeDelta;
+        public Vector2 AnchorMin;
+        public Vector2 AnchorMax;
+        public Vector2 Pivot;
+        public Vector3 LocalScale;
+        public Quaternion LocalRotation;
+        public int SiblingIndex;
+    }
 
     public bool IsOnlineMatchMode => isOnlineMatchMode;
     public int ActivePlayerCount => activePlayerCount;
@@ -86,6 +100,7 @@ public class GameController : MonoBehaviour
             FusionManager.Instance.PlayerNamesUpdated += ApplyNetworkPlayerNamesToUi;
             FusionManager.Instance.ActivePlayersChanged += HandleFusionActivePlayersChanged;
             FusionManager.Instance.TurnStateReceived += HandleOnlineTurnStateReceived;
+            FusionManager.Instance.EconomyStateReceived += HandleOnlineEconomyStateReceived;
         }
 
         EnsureBotController();
@@ -171,6 +186,7 @@ public class GameController : MonoBehaviour
 
         if (isOnlineMatchMode && FusionManager.Instance != null && FusionManager.Instance.IsMasterClient)
         {
+            PublishOnlineEconomyState();
             PublishOnlineTurnState();
         }
 
@@ -192,6 +208,7 @@ public class GameController : MonoBehaviour
             FusionManager.Instance.PlayerNamesUpdated -= ApplyNetworkPlayerNamesToUi;
             FusionManager.Instance.ActivePlayersChanged -= HandleFusionActivePlayersChanged;
             FusionManager.Instance.TurnStateReceived -= HandleOnlineTurnStateReceived;
+            FusionManager.Instance.EconomyStateReceived -= HandleOnlineEconomyStateReceived;
         }
     }
 
@@ -260,6 +277,16 @@ public class GameController : MonoBehaviour
             }
         }
         ClearWarning();
+    }
+
+    private void HandleOnlineEconomyStateReceived(FusionManager.EconomyStateSnapshot snapshot)
+    {
+        if (!isOnlineMatchMode)
+        {
+            return;
+        }
+
+        ApplyEconomySnapshot(snapshot);
     }
 
     void SetupNobles()
@@ -808,6 +835,7 @@ public class GameController : MonoBehaviour
 
         ResetTimer();
         UpdateTurnVisuals();
+        PublishOnlineEconomyState();
         PublishOnlineTurnState();
         if (!startedQuizThisTurn) {
             ScheduleBotTurnIfNeeded();
@@ -1092,6 +1120,8 @@ public class GameController : MonoBehaviour
                 players[i].SetupPlayer(finalName);
             }
         }
+
+        ConfigureOnlinePlayerPanelLayout();
     }
     
     void ClearContainer(Transform c) { 
@@ -1177,6 +1207,150 @@ public class GameController : MonoBehaviour
         }
 
         FusionManager.Instance.SendTurnState(currentPlayerIndex, currentRound, totalTurnCount, currentTurnDisplay);
+    }
+
+    public void PublishOnlineEconomyState()
+    {
+        if (!isOnlineMatchMode || FusionManager.Instance == null)
+        {
+            return;
+        }
+
+        FusionManager.Instance.SendEconomyState(BuildEconomySnapshot());
+    }
+
+    private FusionManager.EconomyStateSnapshot BuildEconomySnapshot()
+    {
+        var snapshot = new FusionManager.EconomyStateSnapshot
+        {
+            BankCoins = (int[])bankCoins.Clone(),
+            Players = new FusionManager.EconomyPlayerSnapshot[activePlayerCount]
+        };
+
+        for (int i = 0; i < activePlayerCount; i++)
+        {
+            PlayerUI player = players[i];
+            snapshot.Players[i] = new FusionManager.EconomyPlayerSnapshot
+            {
+                Score = player != null ? player.currentScore : 0,
+                Coins = player != null ? (int[])player.coins.Clone() : new int[6],
+                Bonuses = player != null ? (int[])player.bonuses.Clone() : new int[5]
+            };
+        }
+
+        return snapshot;
+    }
+
+    private void ApplyEconomySnapshot(FusionManager.EconomyStateSnapshot snapshot)
+    {
+        if (snapshot.BankCoins != null)
+        {
+            for (int i = 0; i < bankCoins.Length && i < snapshot.BankCoins.Length; i++)
+            {
+                bankCoins[i] = snapshot.BankCoins[i];
+            }
+        }
+
+        if (snapshot.Players != null)
+        {
+            for (int i = 0; i < activePlayerCount && i < snapshot.Players.Length && i < players.Length; i++)
+            {
+                PlayerUI player = players[i];
+                if (player == null)
+                {
+                    continue;
+                }
+
+                player.currentScore = snapshot.Players[i].Score;
+
+                if (snapshot.Players[i].Coins != null)
+                {
+                    for (int coinIndex = 0; coinIndex < player.coins.Length && coinIndex < snapshot.Players[i].Coins.Length; coinIndex++)
+                    {
+                        player.coins[coinIndex] = snapshot.Players[i].Coins[coinIndex];
+                    }
+                }
+
+                if (snapshot.Players[i].Bonuses != null)
+                {
+                    for (int bonusIndex = 0; bonusIndex < player.bonuses.Length && bonusIndex < snapshot.Players[i].Bonuses.Length; bonusIndex++)
+                    {
+                        player.bonuses[bonusIndex] = snapshot.Players[i].Bonuses[bonusIndex];
+                    }
+                }
+
+                if (player.scoreText != null)
+                {
+                    player.scoreText.text = player.currentScore.ToString();
+                }
+
+                player.UpdateUI();
+            }
+        }
+
+        UpdateBankUI();
+    }
+
+    private void ConfigureOnlinePlayerPanelLayout()
+    {
+        if (!isOnlineMatchMode || players == null || players.Length < 2 || players[0] == null || players[1] == null)
+        {
+            return;
+        }
+
+        CapturePlayerPanelLayoutsIfNeeded();
+
+        int localSeat = GetResolvedLocalPlayerSlotIndex();
+        ApplyPlayerPanelLayout(players[0], capturedPlayerPanelLayouts[localSeat == 0 ? 0 : 1]);
+        ApplyPlayerPanelLayout(players[1], capturedPlayerPanelLayouts[localSeat == 0 ? 1 : 0]);
+    }
+
+    private void CapturePlayerPanelLayoutsIfNeeded()
+    {
+        if (playerPanelLayoutsCaptured || players == null || players.Length < 2)
+        {
+            return;
+        }
+
+        capturedPlayerPanelLayouts = new PlayerPanelLayout[2];
+        for (int i = 0; i < 2; i++)
+        {
+            if (players[i] == null || !players[i].TryGetComponent(out RectTransform rectTransform))
+            {
+                continue;
+            }
+
+            capturedPlayerPanelLayouts[i] = new PlayerPanelLayout
+            {
+                AnchoredPosition = rectTransform.anchoredPosition,
+                SizeDelta = rectTransform.sizeDelta,
+                AnchorMin = rectTransform.anchorMin,
+                AnchorMax = rectTransform.anchorMax,
+                Pivot = rectTransform.pivot,
+                LocalScale = rectTransform.localScale,
+                LocalRotation = rectTransform.localRotation,
+                SiblingIndex = rectTransform.GetSiblingIndex()
+            };
+        }
+
+        playerPanelLayoutsCaptured = true;
+    }
+
+    private static void ApplyPlayerPanelLayout(PlayerUI player, PlayerPanelLayout layout)
+    {
+        if (player == null || !player.TryGetComponent(out RectTransform rectTransform))
+        {
+            return;
+        }
+
+        rectTransform.anchorMin = layout.AnchorMin;
+        rectTransform.anchorMax = layout.AnchorMax;
+        rectTransform.pivot = layout.Pivot;
+        rectTransform.anchoredPosition = layout.AnchoredPosition;
+        rectTransform.sizeDelta = layout.SizeDelta;
+        rectTransform.localScale = layout.LocalScale;
+        rectTransform.localRotation = layout.LocalRotation;
+        rectTransform.SetSiblingIndex(layout.SiblingIndex);
     }
 
     // [NEW] อัปเดตตัวเลขเทิร์นบน UI

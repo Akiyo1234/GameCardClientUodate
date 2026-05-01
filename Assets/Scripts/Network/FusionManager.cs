@@ -19,6 +19,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     public event Action<int> QuizStartedReceived;
     public event Action<QuizAnswerSnapshot> QuizAnswerReceived;
     public event Action<List<QuizAnswerSnapshot>, List<int>> QuizResultsReceived;
+    public event Action<EconomyStateSnapshot> EconomyStateReceived;
 
     private const char PlayerNameSeparator = '|';
     private const string PlayerNameMessageType = "NAME";
@@ -26,6 +27,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     private const string QuizStartMessageType = "QUIZSTART";
     private const string QuizAnswerMessageType = "QUIZANSWER";
     private const string QuizResultMessageType = "QUIZRESULT";
+    private const string EconomyStateMessageType = "ECON";
     private NetworkRunner _runner;
     private NetworkSceneManagerDefault _sceneManager;
     private readonly Dictionary<int, string> _playerNames = new Dictionary<int, string>();
@@ -35,6 +37,19 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         public int PlayerIndex;
         public bool IsCorrect;
         public float TimeTaken;
+    }
+
+    public struct EconomyPlayerSnapshot
+    {
+        public int Score;
+        public int[] Coins;
+        public int[] Bonuses;
+    }
+
+    public struct EconomyStateSnapshot
+    {
+        public int[] BankCoins;
+        public EconomyPlayerSnapshot[] Players;
     }
 
     [Header("---- Scene Names ----")]
@@ -300,6 +315,36 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
             return;
         }
 
+        if (string.Equals(parts[0], EconomyStateMessageType, StringComparison.Ordinal))
+        {
+            if (parts.Length < 3)
+            {
+                return;
+            }
+
+            EconomyStateSnapshot snapshot = DecodeEconomyState(parts[1], parts[2]);
+            if (runner.IsServer)
+            {
+                EconomyStateReceived?.Invoke(snapshot);
+
+                foreach (var activePlayer in runner.ActivePlayers)
+                {
+                    if (activePlayer == player || activePlayer == runner.LocalPlayer)
+                    {
+                        continue;
+                    }
+
+                    runner.SendReliableDataToPlayer(activePlayer, default, data.ToArray());
+                }
+            }
+            else
+            {
+                EconomyStateReceived?.Invoke(snapshot);
+            }
+
+            return;
+        }
+
         int separatorIndex = payload.IndexOf(PlayerNameSeparator);
         if (separatorIndex <= 0 || separatorIndex >= payload.Length - 1)
         {
@@ -525,6 +570,36 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         }
     }
 
+    public void SendEconomyState(EconomyStateSnapshot snapshot)
+    {
+        if (_runner == null)
+        {
+            return;
+        }
+
+        string bankPayload = EncodeIntArray(snapshot.BankCoins);
+        string playersPayload = EncodeEconomyPlayers(snapshot.Players);
+        byte[] payload = Encoding.UTF8.GetBytes(
+            $"{EconomyStateMessageType}{PlayerNameSeparator}{bankPayload}{PlayerNameSeparator}{playersPayload}");
+
+        if (_runner.IsServer)
+        {
+            foreach (var activePlayer in _runner.ActivePlayers)
+            {
+                if (activePlayer == _runner.LocalPlayer)
+                {
+                    continue;
+                }
+
+                _runner.SendReliableDataToPlayer(activePlayer, default, payload);
+            }
+
+            return;
+        }
+
+        _runner.SendReliableDataToServer(default, payload);
+    }
+
     private void SendLocalPlayerNameToServer()
     {
         if (_runner == null)
@@ -722,6 +797,84 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         }
 
         return rewardGemIndices;
+    }
+
+    private static string EncodeEconomyPlayers(IEnumerable<EconomyPlayerSnapshot> players)
+    {
+        if (players == null)
+        {
+            return string.Empty;
+        }
+
+        return string.Join(";", players.Select(player =>
+            $"{player.Score}~{EncodeIntArray(player.Coins)}~{EncodeIntArray(player.Bonuses)}"));
+    }
+
+    private static EconomyStateSnapshot DecodeEconomyState(string bankPayload, string playersPayload)
+    {
+        var snapshot = new EconomyStateSnapshot
+        {
+            BankCoins = DecodeIntArray(bankPayload),
+            Players = System.Array.Empty<EconomyPlayerSnapshot>()
+        };
+
+        if (string.IsNullOrWhiteSpace(playersPayload))
+        {
+            return snapshot;
+        }
+
+        string[] playerEntries = playersPayload.Split(';');
+        var players = new List<EconomyPlayerSnapshot>(playerEntries.Length);
+        foreach (string playerEntry in playerEntries)
+        {
+            if (string.IsNullOrWhiteSpace(playerEntry))
+            {
+                continue;
+            }
+
+            string[] parts = playerEntry.Split('~');
+            if (parts.Length < 3 || !int.TryParse(parts[0], out int score))
+            {
+                continue;
+            }
+
+            players.Add(new EconomyPlayerSnapshot
+            {
+                Score = score,
+                Coins = DecodeIntArray(parts[1]),
+                Bonuses = DecodeIntArray(parts[2])
+            });
+        }
+
+        snapshot.Players = players.ToArray();
+        return snapshot;
+    }
+
+    private static string EncodeIntArray(IEnumerable<int> values)
+    {
+        if (values == null)
+        {
+            return string.Empty;
+        }
+
+        return string.Join(",", values);
+    }
+
+    private static int[] DecodeIntArray(string payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            return System.Array.Empty<int>();
+        }
+
+        string[] parts = payload.Split(',');
+        int[] values = new int[parts.Length];
+        for (int i = 0; i < parts.Length; i++)
+        {
+            int.TryParse(parts[i], out values[i]);
+        }
+
+        return values;
     }
 
     private static string GetLocalPlayerName(int fallbackPlayerId)
