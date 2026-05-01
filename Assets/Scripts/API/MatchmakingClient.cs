@@ -1,7 +1,9 @@
-using System;
+﻿using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -17,7 +19,10 @@ public class MatchmakingClient : MonoBehaviour
 
     [Header("Scene")]
     [SerializeField] private string gameSceneName = "SampleScene";
-    [SerializeField] private float pollIntervalSeconds = 2f;
+    [SerializeField] private float pollIntervalSeconds = 1.5f;
+
+    [Header("UI")]
+    [SerializeField] private TextMeshProUGUI statusText;
 
     private Coroutine _pollCoroutine;
     private string _currentPlayerId;
@@ -37,15 +42,10 @@ public class MatchmakingClient : MonoBehaviour
         _currentPlayerId = GetOrCreatePlayerId();
         _isConnectingToFusion = false;
         ClearSavedMatch();
+        StopPolling();
 
         Debug.Log($"[Matchmaking] FindMatch pressed. PlayerId={_currentPlayerId}");
-
-        if (_pollCoroutine != null)
-        {
-            StopCoroutine(_pollCoroutine);
-            _pollCoroutine = null;
-        }
-
+        SetStatus("Searching...");
         StartCoroutine(JoinMatchmakingCoroutine());
     }
 
@@ -54,16 +54,11 @@ public class MatchmakingClient : MonoBehaviour
     {
         _currentPlayerId = GetOrCreatePlayerId();
         _isConnectingToFusion = false;
+        StopPolling();
         ClearSavedMatch();
 
         Debug.Log($"[Matchmaking] CancelMatchmaking pressed. PlayerId={_currentPlayerId}");
-
-        if (_pollCoroutine != null)
-        {
-            StopCoroutine(_pollCoroutine);
-            _pollCoroutine = null;
-        }
-
+        SetStatus("Cancelled");
         StartCoroutine(CancelMatchmakingCoroutine());
     }
 
@@ -75,11 +70,19 @@ public class MatchmakingClient : MonoBehaviour
         StartCoroutine(PollMatchStatusOnceCoroutine());
     }
 
+    // Optional button/debug hook: force the current client to re-run the match creation attempt.
+    public void TryCreateMatch()
+    {
+        _currentPlayerId = GetOrCreatePlayerId();
+        Debug.Log($"[Matchmaking] TryCreateMatch requested. PlayerId={_currentPlayerId}");
+        StartCoroutine(TryCreateMatchCoroutine());
+    }
+
     private IEnumerator JoinMatchmakingCoroutine()
     {
         yield return WaitForSupabaseReadyCoroutine();
 
-        var task = JoinMatchmakingAsync();
+        var task = FindOrCreateWaitingEntryAsync();
         yield return WaitForTask(task, "join matchmaking");
 
         if (!TryGetTaskResult(task, out var entry) || entry == null)
@@ -88,8 +91,7 @@ public class MatchmakingClient : MonoBehaviour
         }
 
         HandleQueueEntry(entry);
-
-        if (entry.Status == WaitingStatus)
+        if (IsWaitingEntry(entry))
         {
             RestartPolling();
         }
@@ -109,6 +111,21 @@ public class MatchmakingClient : MonoBehaviour
 
         var task = PollMatchStatusAsync();
         yield return WaitForTask(task, "poll match status");
+
+        if (!TryGetTaskResult(task, out var entry) || entry == null)
+        {
+            return;
+        }
+
+        HandleQueueEntry(entry);
+    }
+
+    private IEnumerator TryCreateMatchCoroutine()
+    {
+        yield return WaitForSupabaseReadyCoroutine();
+
+        var task = TryCreateMatchForCurrentPlayerAsync();
+        yield return WaitForTask(task, "try create match");
 
         if (!TryGetTaskResult(task, out var entry) || entry == null)
         {
@@ -136,15 +153,20 @@ public class MatchmakingClient : MonoBehaviour
 
     private void RestartPolling()
     {
-        if (_pollCoroutine != null)
-        {
-            StopCoroutine(_pollCoroutine);
-        }
-
+        StopPolling();
         _pollCoroutine = StartCoroutine(PollLoopCoroutine());
     }
 
-    private async Task<MatchmakingQueueData> JoinMatchmakingAsync()
+    private void StopPolling()
+    {
+        if (_pollCoroutine != null)
+        {
+            StopCoroutine(_pollCoroutine);
+            _pollCoroutine = null;
+        }
+    }
+
+    private async Task<MatchmakingQueueData> FindOrCreateWaitingEntryAsync()
     {
         var client = GetSupabaseClient();
         if (client == null)
@@ -152,7 +174,12 @@ public class MatchmakingClient : MonoBehaviour
             return null;
         }
 
-        await CancelWaitingEntriesAsync(client);
+        var existingWaitingEntry = await GetLatestWaitingQueueEntryAsync(client);
+        if (existingWaitingEntry != null)
+        {
+            Debug.Log($"[Matchmaking] Existing waiting row found. Reusing Id={existingWaitingEntry.Id}");
+            return await TryCreateMatchAsync(client, existingWaitingEntry);
+        }
 
         var queueEntry = new MatchmakingQueueData
         {
@@ -161,12 +188,29 @@ public class MatchmakingClient : MonoBehaviour
             CreatedAt = DateTime.UtcNow
         };
 
-        var insertResponse = await client.From<MatchmakingQueueData>().Insert(queueEntry);
-        var createdEntry = insertResponse.Models.FirstOrDefault() ?? queueEntry;
+        try
+        {
+            var insertResponse = await client.From<MatchmakingQueueData>().Insert(queueEntry);
+            var createdEntry = insertResponse.Models.FirstOrDefault() ?? queueEntry;
+            Debug.Log($"[Matchmaking] Queue entry created. Id={createdEntry.Id}, PlayerId={createdEntry.PlayerId}, Status={createdEntry.Status}");
+            return await TryCreateMatchAsync(client, createdEntry);
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning($"[Matchmaking] Insert waiting row warning: {ex.Message}");
+            if (LooksLikeDuplicateQueueError(ex))
+            {
+                var duplicateWaitingEntry = await GetLatestWaitingQueueEntryAsync(client);
+                if (duplicateWaitingEntry != null)
+                {
+                    Debug.Log($"[Matchmaking] Duplicate waiting row detected. Reusing Id={duplicateWaitingEntry.Id}");
+                    return await TryCreateMatchAsync(client, duplicateWaitingEntry);
+                }
+            }
 
-        Debug.Log($"[Matchmaking] Queue entry created. Id={createdEntry.Id}, PlayerId={createdEntry.PlayerId}, Status={createdEntry.Status}");
-
-        return await TryCreateMatchAsync(client, createdEntry);
+            SetErrorStatus(ex.Message);
+            throw;
+        }
     }
 
     private async Task CancelMatchmakingAsync()
@@ -177,8 +221,15 @@ public class MatchmakingClient : MonoBehaviour
             return;
         }
 
-        await CancelWaitingEntriesAsync(client);
-        Debug.Log("[Matchmaking] Matchmaking cancelled.");
+        var waitingEntries = await GetWaitingEntriesForCurrentPlayerAsync(client);
+        foreach (var entry in waitingEntries)
+        {
+            entry.Status = CancelledStatus;
+            entry.RoomCode = null;
+            entry.MatchedAt = null;
+            await client.From<MatchmakingQueueData>().Update(entry);
+            Debug.Log($"[Matchmaking] Queue entry cancelled. Id={entry.Id}, PlayerId={entry.PlayerId}");
+        }
     }
 
     private async Task<MatchmakingQueueData> PollMatchStatusAsync()
@@ -193,12 +244,12 @@ public class MatchmakingClient : MonoBehaviour
         if (latestEntry == null)
         {
             Debug.LogWarning($"[Matchmaking] No queue entry found for PlayerId={_currentPlayerId}");
+            SetStatus("Searching...");
             return null;
         }
 
         Debug.Log($"[Matchmaking] Latest queue entry. Id={latestEntry.Id}, Status={latestEntry.Status}, RoomCode={latestEntry.RoomCode}");
-
-        if (latestEntry.Status == WaitingStatus)
+        if (IsWaitingEntry(latestEntry))
         {
             return await TryCreateMatchAsync(client, latestEntry);
         }
@@ -206,26 +257,32 @@ public class MatchmakingClient : MonoBehaviour
         return latestEntry;
     }
 
+    private async Task<MatchmakingQueueData> TryCreateMatchForCurrentPlayerAsync()
+    {
+        var client = GetSupabaseClient();
+        if (client == null)
+        {
+            return null;
+        }
+
+        var waitingEntry = await GetLatestWaitingQueueEntryAsync(client);
+        if (waitingEntry == null)
+        {
+            Debug.LogWarning($"[Matchmaking] No waiting entry available for PlayerId={_currentPlayerId}");
+            return await GetLatestQueueEntryAsync(client);
+        }
+
+        return await TryCreateMatchAsync(client, waitingEntry);
+    }
+
     private async Task<MatchmakingQueueData> TryCreateMatchAsync(Supabase.Client client, MatchmakingQueueData currentEntry)
     {
-        if (currentEntry == null || currentEntry.Status != WaitingStatus)
+        if (!IsWaitingEntry(currentEntry))
         {
             return currentEntry;
         }
 
-        var waitingResponse = await client
-            .From<MatchmakingQueueData>()
-            .Where(x => x.Status == WaitingStatus)
-            .Order(x => x.CreatedAt, Postgrest.Constants.Ordering.Ascending)
-            .Limit(2)
-            .Get();
-
-        var waitingEntries = waitingResponse.Models
-            .Where(IsWaitingEntry)
-            .OrderBy(x => x.CreatedAt)
-            .ThenBy(x => x.Id)
-            .ToList();
-
+        var waitingEntries = await GetTopWaitingEntriesAsync(client);
         if (waitingEntries.Count < 2)
         {
             Debug.Log($"[Matchmaking] Waiting for more players. Current waiting count={waitingEntries.Count}");
@@ -235,7 +292,13 @@ public class MatchmakingClient : MonoBehaviour
         var firstEntry = waitingEntries[0];
         var secondEntry = waitingEntries[1];
 
-        if (firstEntry.Id != currentEntry.Id)
+        if (!IsWaitingEntry(firstEntry) || !IsWaitingEntry(secondEntry))
+        {
+            Debug.LogWarning("[Matchmaking] Match creation skipped because one of the top queue rows is no longer waiting.");
+            return await GetLatestWaitingQueueEntryAsync(client) ?? await GetLatestQueueEntryAsync(client);
+        }
+
+        if (!string.Equals(firstEntry.Id, currentEntry.Id, StringComparison.OrdinalIgnoreCase))
         {
             Debug.Log($"[Matchmaking] Another player is first in queue. CurrentEntry={currentEntry.Id}, FirstEntry={firstEntry.Id}");
             return await GetLatestWaitingQueueEntryAsync(client) ?? await GetLatestQueueEntryAsync(client);
@@ -247,33 +310,54 @@ public class MatchmakingClient : MonoBehaviour
             return await GetLatestWaitingQueueEntryAsync(client) ?? await GetLatestQueueEntryAsync(client);
         }
 
-        if (!IsWaitingEntry(firstEntry) || !IsWaitingEntry(secondEntry))
-        {
-            Debug.LogWarning("[Matchmaking] Match creation skipped because one of the top queue entries is no longer waiting.");
-            return await GetLatestWaitingQueueEntryAsync(client) ?? await GetLatestQueueEntryAsync(client);
-        }
-
-        var roomCode = GenerateRoomCode();
-        var matchedAt = DateTime.UtcNow;
+        string roomCode = GenerateRoomCode();
+        DateTime matchedAt = DateTime.UtcNow;
 
         firstEntry.Status = MatchedStatus;
         firstEntry.RoomCode = roomCode;
-        firstEntry.MatchedPlayerId = secondEntry.PlayerId;
         firstEntry.MatchedAt = matchedAt;
 
         secondEntry.Status = MatchedStatus;
         secondEntry.RoomCode = roomCode;
-        secondEntry.MatchedPlayerId = firstEntry.PlayerId;
         secondEntry.MatchedAt = matchedAt;
 
-        await client.From<MatchmakingQueueData>().Update(firstEntry);
-        await client.From<MatchmakingQueueData>().Update(secondEntry);
-
-        Debug.Log($"[Matchmaking] Match created. RoomCode={roomCode}, PlayerA={firstEntry.PlayerId}, PlayerB={secondEntry.PlayerId}");
+        try
+        {
+            await client.From<MatchmakingQueueData>().Update(firstEntry);
+            await client.From<MatchmakingQueueData>().Update(secondEntry);
+            Debug.Log($"[Matchmaking] Match created. RoomCode={roomCode}, PlayerA={firstEntry.PlayerId}, PlayerB={secondEntry.PlayerId}");
+        }
+        catch (Exception ex)
+        {
+            Debug.LogWarning($"[Matchmaking] Match update warning. Will re-poll. {ex.Message}");
+            return await GetLatestQueueEntryAsync(client);
+        }
 
         return string.Equals(_currentPlayerId, firstEntry.PlayerId, StringComparison.OrdinalIgnoreCase)
             ? firstEntry
             : secondEntry;
+    }
+
+    private async Task<List<MatchmakingQueueData>> GetTopWaitingEntriesAsync(Supabase.Client client)
+    {
+        var waitingResponse = await client
+            .From<MatchmakingQueueData>()
+            .Where(x => x.Status == WaitingStatus)
+            .Order(x => x.CreatedAt, Postgrest.Constants.Ordering.Ascending)
+            .Limit(10)
+            .Get();
+
+        return waitingResponse.Models
+            .Where(IsWaitingEntry)
+            .GroupBy(x => x.PlayerId, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group
+                .OrderBy(x => x.CreatedAt)
+                .ThenBy(x => x.Id, StringComparer.OrdinalIgnoreCase)
+                .First())
+            .OrderBy(x => x.CreatedAt)
+            .ThenBy(x => x.Id, StringComparer.OrdinalIgnoreCase)
+            .Take(2)
+            .ToList();
     }
 
     private async Task<MatchmakingQueueData> GetLatestQueueEntryAsync(Supabase.Client client)
@@ -292,7 +376,8 @@ public class MatchmakingClient : MonoBehaviour
     {
         var response = await client
             .From<MatchmakingQueueData>()
-            .Where(x => x.PlayerId == _currentPlayerId && x.Status == WaitingStatus)
+            .Where(x => x.PlayerId == _currentPlayerId)
+            .Where(x => x.Status == WaitingStatus)
             .Order(x => x.CreatedAt, Postgrest.Constants.Ordering.Descending)
             .Limit(1)
             .Get();
@@ -300,19 +385,15 @@ public class MatchmakingClient : MonoBehaviour
         return response.Models.FirstOrDefault();
     }
 
-    private async Task CancelWaitingEntriesAsync(Supabase.Client client)
+    private async Task<List<MatchmakingQueueData>> GetWaitingEntriesForCurrentPlayerAsync(Supabase.Client client)
     {
         var response = await client
             .From<MatchmakingQueueData>()
-            .Where(x => x.PlayerId == _currentPlayerId && x.Status == WaitingStatus)
+            .Where(x => x.PlayerId == _currentPlayerId)
+            .Where(x => x.Status == WaitingStatus)
             .Get();
 
-        foreach (var entry in response.Models)
-        {
-            entry.Status = CancelledStatus;
-            await client.From<MatchmakingQueueData>().Update(entry);
-            Debug.Log($"[Matchmaking] Queue entry cancelled. Id={entry.Id}, PlayerId={entry.PlayerId}");
-        }
+        return response.Models.Where(IsWaitingEntry).ToList();
     }
 
     private void HandleQueueEntry(MatchmakingQueueData entry)
@@ -320,33 +401,40 @@ public class MatchmakingClient : MonoBehaviour
         if (entry == null)
         {
             Debug.LogWarning("[Matchmaking] Queue entry not found.");
+            SetErrorStatus("Queue entry not found.");
             return;
         }
 
         Debug.Log($"[Matchmaking] Status: {entry.Status}");
+        if (IsWaitingEntry(entry))
+        {
+            SetStatus("Searching...");
+            return;
+        }
 
-        if (entry.Status != MatchedStatus || string.IsNullOrWhiteSpace(entry.RoomCode))
+        if (string.Equals(entry.Status, CancelledStatus, StringComparison.OrdinalIgnoreCase))
+        {
+            SetStatus("Cancelled");
+            return;
+        }
+
+        if (!string.Equals(entry.Status, MatchedStatus, StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(entry.RoomCode))
         {
             return;
         }
 
-        if (_pollCoroutine != null)
-        {
-            StopCoroutine(_pollCoroutine);
-            _pollCoroutine = null;
-        }
-
+        StopPolling();
         if (_isConnectingToFusion)
         {
             return;
         }
 
         _isConnectingToFusion = true;
-
-        PlayerPrefs.SetString(RoomIdPrefsKey, entry.Id.ToString());
+        PlayerPrefs.SetString(RoomIdPrefsKey, entry.Id ?? string.Empty);
         PlayerPrefs.SetString(RoomCodePrefsKey, entry.RoomCode);
         PlayerPrefs.Save();
 
+        SetStatus("Match found");
         Debug.Log($"[Matchmaking] Match found. RoomCode={entry.RoomCode}");
 
         if (FusionManager.Instance != null)
@@ -366,6 +454,7 @@ public class MatchmakingClient : MonoBehaviour
         if (manager == null)
         {
             Debug.LogWarning("[Matchmaking] SupabaseManager is missing from the scene.");
+            SetErrorStatus("SupabaseManager is missing from the scene.");
             yield break;
         }
 
@@ -387,14 +476,15 @@ public class MatchmakingClient : MonoBehaviour
 
         if (task.IsFaulted)
         {
-            Debug.LogError($"[Matchmaking] Failed to {actionName}: {task.Exception?.GetBaseException().Message}");
+            string errorMessage = task.Exception?.GetBaseException().Message ?? "Unknown error";
+            SetErrorStatus(errorMessage);
+            Debug.LogError($"[Matchmaking] Failed to {actionName}: {errorMessage}");
         }
     }
 
     private static bool TryGetTaskResult<T>(Task<T> task, out T result)
     {
         result = default;
-
         if (task == null || task.IsFaulted || task.IsCanceled)
         {
             return false;
@@ -406,13 +496,12 @@ public class MatchmakingClient : MonoBehaviour
 
     private static string GenerateRoomCode()
     {
-        return Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+        return "ROOM-" + Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
     }
 
     private static bool IsWaitingEntry(MatchmakingQueueData entry)
     {
-        return entry != null &&
-               string.Equals(entry.Status, WaitingStatus, StringComparison.OrdinalIgnoreCase);
+        return entry != null && string.Equals(entry.Status, WaitingStatus, StringComparison.OrdinalIgnoreCase);
     }
 
     private Supabase.Client GetSupabaseClient()
@@ -431,6 +520,27 @@ public class MatchmakingClient : MonoBehaviour
         PlayerPrefs.DeleteKey(RoomIdPrefsKey);
         PlayerPrefs.DeleteKey(RoomCodePrefsKey);
         PlayerPrefs.Save();
+    }
+
+    private void SetStatus(string message)
+    {
+        if (statusText != null)
+        {
+            statusText.text = message;
+        }
+
+        Debug.Log($"[Matchmaking] UI Status => {message}");
+    }
+
+    private void SetErrorStatus(string errorMessage)
+    {
+        if (string.IsNullOrWhiteSpace(errorMessage))
+        {
+            SetStatus("Error");
+            return;
+        }
+
+        SetStatus($"Error: {errorMessage}");
     }
 
     private string GetOrCreatePlayerId()
@@ -462,5 +572,13 @@ public class MatchmakingClient : MonoBehaviour
         PlayerPrefs.SetString(PlayerIdPrefsKey, savedPlayerId);
         PlayerPrefs.Save();
         return savedPlayerId;
+    }
+
+    private static bool LooksLikeDuplicateQueueError(Exception ex)
+    {
+        string message = ex?.Message ?? string.Empty;
+        return message.Contains("23505", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("duplicate", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("unique", StringComparison.OrdinalIgnoreCase);
     }
 }

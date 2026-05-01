@@ -6,7 +6,7 @@ using System;
 public class MatchmakingQueueData : BaseModel
 {
     [PrimaryKey("id", false)]
-    public int Id { get; set; }
+    public string Id { get; set; }
 
     [Column("player_id")]
     public string PlayerId { get; set; }
@@ -16,9 +16,6 @@ public class MatchmakingQueueData : BaseModel
 
     [Column("room_code")]
     public string RoomCode { get; set; }
-
-    [Column("matched_player_id")]
-    public string MatchedPlayerId { get; set; }
 
     [Column("created_at")]
     public DateTime CreatedAt { get; set; }
