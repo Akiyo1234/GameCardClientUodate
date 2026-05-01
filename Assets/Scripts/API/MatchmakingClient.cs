@@ -77,6 +77,8 @@ public class MatchmakingClient : MonoBehaviour
 
     private IEnumerator JoinMatchmakingCoroutine()
     {
+        yield return WaitForSupabaseReadyCoroutine();
+
         var task = JoinMatchmakingAsync();
         yield return WaitForTask(task, "join matchmaking");
 
@@ -95,12 +97,16 @@ public class MatchmakingClient : MonoBehaviour
 
     private IEnumerator CancelMatchmakingCoroutine()
     {
+        yield return WaitForSupabaseReadyCoroutine();
+
         var task = CancelMatchmakingAsync();
         yield return WaitForTask(task, "cancel matchmaking");
     }
 
     private IEnumerator PollMatchStatusOnceCoroutine()
     {
+        yield return WaitForSupabaseReadyCoroutine();
+
         var task = PollMatchStatusAsync();
         yield return WaitForTask(task, "poll match status");
 
@@ -333,6 +339,27 @@ public class MatchmakingClient : MonoBehaviour
 
         Debug.Log($"[Matchmaking] FusionManager not found. Loading scene {gameSceneName} only.");
         SceneManager.LoadScene(gameSceneName);
+    }
+
+    private IEnumerator WaitForSupabaseReadyCoroutine()
+    {
+        var manager = SupabaseManager.Instance;
+        if (manager == null)
+        {
+            Debug.LogWarning("[Matchmaking] SupabaseManager is missing from the scene.");
+            yield break;
+        }
+
+        if (manager.IsInitialized && manager.Client != null)
+        {
+            yield break;
+        }
+
+        Debug.Log("[Matchmaking] Waiting for Supabase client to finish initializing...");
+        yield return new WaitUntil(() => SupabaseManager.Instance != null &&
+                                        SupabaseManager.Instance.IsInitialized &&
+                                        SupabaseManager.Instance.Client != null);
+        Debug.Log("[Matchmaking] Supabase client is ready.");
     }
 
     private IEnumerator WaitForTask(Task task, string actionName)

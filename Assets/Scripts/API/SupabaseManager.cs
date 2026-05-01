@@ -20,6 +20,7 @@ public class SupabaseManager : MonoBehaviour
     // ตัวแปรสำหรับเรียกใช้ฐานข้อมูลจากสคริปต์อื่น
     private Supabase.Client supabaseClient;
     public Supabase.Client Client => supabaseClient;
+    public bool IsInitialized { get; private set; }
 
     private async void Awake()
     {
@@ -39,6 +40,8 @@ public class SupabaseManager : MonoBehaviour
 
     private async Task InitializeSupabase()
     {
+        IsInitialized = false;
+
         if (string.IsNullOrEmpty(supabaseUrl) || string.IsNullOrEmpty(supabaseKey))
         {
             Debug.LogError("<color=red>❌ [Supabase] ล้มเหลว! คุณยังไม่ได้ใส่ URL หรือ Key ใน Inspector</color>");
@@ -53,6 +56,7 @@ public class SupabaseManager : MonoBehaviour
         // สร้างตัวเชื่อมต่อ
         supabaseClient = new Supabase.Client(supabaseUrl, supabaseKey, options);
         await supabaseClient.InitializeAsync();
+        IsInitialized = true;
         
         Debug.Log("<color=green>✅ [Supabase] เชื่อมต่อ Database สำเร็จแล้ว!</color>");
     }
