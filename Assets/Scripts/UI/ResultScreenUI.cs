@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 using System.Collections.Generic;
@@ -7,6 +7,9 @@ using System;
 
 public class ResultScreenUI : MonoBehaviour
 {
+    private const string MatchmakingRoomIdPrefsKey = "MatchmakingRoomId";
+    private const string MatchmakingRoomCodePrefsKey = "MatchmakingRoomCode";
+
     [Header("---- UI Panels ----")]
     public GameObject mainPanel;
     public TextMeshProUGUI titleText;
@@ -24,7 +27,7 @@ public class ResultScreenUI : MonoBehaviour
     public Action onClosed;
 
     [Header("---- Effects ----")]
-    public ParticleSystem victoryParticles; // ช่องใส่เอฟเฟกต์พลุ
+    public ParticleSystem victoryParticles;
 
     void Awake()
     {
@@ -37,7 +40,6 @@ public class ResultScreenUI : MonoBehaviour
         if (isDisplaying && isAutoCloseEnabled && countdown > 0)
         {
             countdown -= Time.deltaTime;
-            // อัปเดตข้อความที่ปุ่มเพื่อบอกเวลาถอยหลัง
             if (buttonText != null)
             {
                 string actionLabel = isGameOver ? "กลับหน้าเมนู" : "เริ่มเกมต่อ";
@@ -51,27 +53,28 @@ public class ResultScreenUI : MonoBehaviour
         }
     }
 
-    // ฟังก์ชันหลักที่ใช้เรียกโชว์ผลการจัดอันดับ (อัปเดตให้รองรับการจุดพลุ)
     public void ShowResults(string title, List<string> playerRankings, bool gameOverStatus, bool playFireworks = false)
     {
         isGameOver = gameOverStatus;
         isAutoCloseEnabled = gameOverStatus;
         titleText.text = title;
-        
-        // ลบลิสต์เดิมออกก่อน
-        foreach (Transform child in playerListContainer) Destroy(child.gameObject);
 
-        // สร้างแถบชื่อผู้เล่นตามลำดับ
+        foreach (Transform child in playerListContainer)
+        {
+            Destroy(child.gameObject);
+        }
+
         for (int i = 0; i < playerRankings.Count; i++)
         {
             GameObject row = Instantiate(playerRowPrefab, playerListContainer);
-            // สมมติใน Prefab มี TextMeshPro ชื่อ "Text" หรือใช้ GetComponentInChildren ก็ได้
             var rowText = row.GetComponentInChildren<TextMeshProUGUI>();
             if (rowText != null)
             {
                 rowText.text = $"อันดับที่ {i + 1}: {playerRankings[i]}";
-                // ถ้าเป็นที่ 1 ให้ตัวหนังสือเป็นสีทอง
-                if (i == 0) rowText.color = new Color(1f, 0.84f, 0f); 
+                if (i == 0)
+                {
+                    rowText.color = new Color(1f, 0.84f, 0f);
+                }
             }
         }
 
@@ -85,7 +88,6 @@ public class ResultScreenUI : MonoBehaviour
             buttonText.text = isAutoCloseEnabled ? $"{actionLabel} ({Mathf.CeilToInt(countdown)}s)" : actionLabel;
         }
 
-        // จุดพลุฉลองถ้าเป็นจบเกม (isGameOver) หรือถูกสั่งให้จุดเฉพาะกิจ (playFireworks)
         if ((isGameOver || playFireworks) && victoryParticles != null)
         {
             victoryParticles.Play();
@@ -101,12 +103,24 @@ public class ResultScreenUI : MonoBehaviour
 
         if (isGameOver)
         {
-            // ถ้าจบเกมแล้วกดปุ่ม ให้เด้งกลับหน้าเมนูพรีเมียม "Mainmenu 1"
-            SceneManager.LoadScene("Mainmenu 1"); 
+            CloseOnlineRoomAndClearMatchState();
+            SceneManager.LoadScene("Mainmenu 1");
         }
         else
         {
             onClosed?.Invoke();
         }
+    }
+
+    private void CloseOnlineRoomAndClearMatchState()
+    {
+        if (FusionManager.Instance != null)
+        {
+            FusionManager.Instance.Disconnect();
+        }
+
+        PlayerPrefs.DeleteKey(MatchmakingRoomIdPrefsKey);
+        PlayerPrefs.DeleteKey(MatchmakingRoomCodePrefsKey);
+        PlayerPrefs.Save();
     }
 }
