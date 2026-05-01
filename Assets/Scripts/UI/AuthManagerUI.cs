@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
 using TMPro;
@@ -162,6 +163,38 @@ public class AuthManagerUI : MonoBehaviour
         }
 
         Debug.Log($"[AuthManagerUI] Opening register page: {finalUrl}");
-        Application.OpenURL(finalUrl);
+        OpenUrl(finalUrl);
+    }
+
+    private void OpenUrl(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            Debug.LogError("[AuthManagerUI] URL is empty.");
+            return;
+        }
+
+        try
+        {
+            if (url.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
+            {
+                string localPath = new Uri(url).LocalPath;
+
+#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = localPath,
+                    UseShellExecute = true
+                });
+                return;
+#endif
+            }
+
+            Application.OpenURL(url);
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"[AuthManagerUI] Failed to open URL: {ex.Message}");
+        }
     }
 }
