@@ -31,6 +31,8 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     private NetworkRunner _runner;
     private NetworkSceneManagerDefault _sceneManager;
     private readonly Dictionary<int, string> _playerNames = new Dictionary<int, string>();
+    private bool _hasPendingQuizStart;
+    private int _pendingQuizStartIndex = -1;
 
     public struct QuizAnswerSnapshot
     {
@@ -90,6 +92,8 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         _runner.AddCallbacks(this);
         _runner.ProvideInput = true;
         _playerNames.Clear();
+        _hasPendingQuizStart = false;
+        _pendingQuizStartIndex = -1;
 
         var result = await _runner.StartGame(new StartGameArgs()
         {
@@ -272,6 +276,8 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
                 return;
             }
 
+            _hasPendingQuizStart = true;
+            _pendingQuizStartIndex = questionIndex;
             QuizStartedReceived?.Invoke(questionIndex);
             return;
         }
@@ -598,6 +604,20 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         }
 
         _runner.SendReliableDataToServer(default, payload);
+    }
+
+    public bool TryConsumePendingQuizStart(out int questionIndex)
+    {
+        if (_hasPendingQuizStart)
+        {
+            questionIndex = _pendingQuizStartIndex;
+            _hasPendingQuizStart = false;
+            _pendingQuizStartIndex = -1;
+            return true;
+        }
+
+        questionIndex = -1;
+        return false;
     }
 
     private void SendLocalPlayerNameToServer()

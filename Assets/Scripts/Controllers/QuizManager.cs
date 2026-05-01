@@ -125,6 +125,11 @@ public class QuizManager : MonoBehaviour
             else
             {
                 PrepareClientWaitingForQuizStart();
+
+                if (FusionManager.Instance.TryConsumePendingQuizStart(out int bufferedQuestionIndex))
+                {
+                    StartQuizInternal(bufferedQuestionIndex);
+                }
             }
 
             return;
