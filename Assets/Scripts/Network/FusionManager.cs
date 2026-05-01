@@ -8,6 +8,7 @@ using UnityEngine.SceneManagement;
 using System.Threading.Tasks;
 using System.Linq;
 using System.Text;
+using System.Globalization;
 
 public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
 {
@@ -15,13 +16,26 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     public event Action PlayerNamesUpdated;
     public event Action ActivePlayersChanged;
     public event Action<int, int, int, int> TurnStateReceived;
+    public event Action<int> QuizStartedReceived;
+    public event Action<QuizAnswerSnapshot> QuizAnswerReceived;
+    public event Action<List<QuizAnswerSnapshot>, List<int>> QuizResultsReceived;
 
     private const char PlayerNameSeparator = '|';
     private const string PlayerNameMessageType = "NAME";
     private const string TurnStateMessageType = "TURN";
+    private const string QuizStartMessageType = "QUIZSTART";
+    private const string QuizAnswerMessageType = "QUIZANSWER";
+    private const string QuizResultMessageType = "QUIZRESULT";
     private NetworkRunner _runner;
     private NetworkSceneManagerDefault _sceneManager;
     private readonly Dictionary<int, string> _playerNames = new Dictionary<int, string>();
+
+    public struct QuizAnswerSnapshot
+    {
+        public int PlayerIndex;
+        public bool IsCorrect;
+        public float TimeTaken;
+    }
 
     [Header("---- Scene Names ----")]
     public string gameSceneName = "SampleScene";
@@ -236,6 +250,56 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
             return;
         }
 
+        if (string.Equals(parts[0], QuizStartMessageType, StringComparison.Ordinal))
+        {
+            if (runner.IsServer || parts.Length < 2 || !int.TryParse(parts[1], out int questionIndex))
+            {
+                return;
+            }
+
+            QuizStartedReceived?.Invoke(questionIndex);
+            return;
+        }
+
+        if (string.Equals(parts[0], QuizAnswerMessageType, StringComparison.Ordinal))
+        {
+            if (!runner.IsServer || parts.Length < 4 || !int.TryParse(parts[1], out int answerPlayerIndex))
+            {
+                return;
+            }
+
+            if (!TryParseBooleanFlag(parts[2], out bool isCorrect) ||
+                !float.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out float timeTaken))
+            {
+                return;
+            }
+
+            QuizAnswerReceived?.Invoke(new QuizAnswerSnapshot
+            {
+                PlayerIndex = answerPlayerIndex,
+                IsCorrect = isCorrect,
+                TimeTaken = timeTaken
+            });
+
+            return;
+        }
+
+        if (string.Equals(parts[0], QuizResultMessageType, StringComparison.Ordinal))
+        {
+            if (runner.IsServer || parts.Length < 2)
+            {
+                return;
+            }
+
+            List<QuizAnswerSnapshot> quizAnswers = DecodeQuizAnswers(parts[1]);
+            List<int> rewardGemIndices = parts.Length >= 3
+                ? DecodeRewardGemIndices(parts[2])
+                : new List<int>();
+
+            QuizResultsReceived?.Invoke(quizAnswers, rewardGemIndices);
+            return;
+        }
+
         int separatorIndex = payload.IndexOf(PlayerNameSeparator);
         if (separatorIndex <= 0 || separatorIndex >= payload.Length - 1)
         {
@@ -405,6 +469,62 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         _runner.SendReliableDataToServer(default, payload);
     }
 
+    public void SendQuizStart(int questionIndex)
+    {
+        if (_runner == null || !_runner.IsServer)
+        {
+            return;
+        }
+
+        byte[] payload = Encoding.UTF8.GetBytes($"{QuizStartMessageType}{PlayerNameSeparator}{questionIndex}");
+        foreach (var activePlayer in _runner.ActivePlayers)
+        {
+            if (activePlayer == _runner.LocalPlayer)
+            {
+                continue;
+            }
+
+            _runner.SendReliableDataToPlayer(activePlayer, default, payload);
+        }
+    }
+
+    public void SendQuizAnswer(int playerIndex, bool isCorrect, float timeTaken)
+    {
+        if (_runner == null || _runner.IsServer)
+        {
+            return;
+        }
+
+        string correctnessFlag = isCorrect ? "1" : "0";
+        string timeTakenText = timeTaken.ToString("0.000", CultureInfo.InvariantCulture);
+        byte[] payload = Encoding.UTF8.GetBytes(
+            $"{QuizAnswerMessageType}{PlayerNameSeparator}{playerIndex}{PlayerNameSeparator}{correctnessFlag}{PlayerNameSeparator}{timeTakenText}");
+        _runner.SendReliableDataToServer(default, payload);
+    }
+
+    public void SendQuizResults(IEnumerable<QuizAnswerSnapshot> answers, IEnumerable<int> rewardGemIndices)
+    {
+        if (_runner == null || !_runner.IsServer)
+        {
+            return;
+        }
+
+        string answersPayload = EncodeQuizAnswers(answers);
+        string rewardsPayload = EncodeRewardGemIndices(rewardGemIndices);
+        byte[] payload = Encoding.UTF8.GetBytes(
+            $"{QuizResultMessageType}{PlayerNameSeparator}{answersPayload}{PlayerNameSeparator}{rewardsPayload}");
+
+        foreach (var activePlayer in _runner.ActivePlayers)
+        {
+            if (activePlayer == _runner.LocalPlayer)
+            {
+                continue;
+            }
+
+            _runner.SendReliableDataToPlayer(activePlayer, default, payload);
+        }
+    }
+
     private void SendLocalPlayerNameToServer()
     {
         if (_runner == null)
@@ -503,6 +623,105 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         }
 
         return "Player " + player.PlayerId;
+    }
+
+    private static bool TryParseBooleanFlag(string value, out bool result)
+    {
+        if (value == "1")
+        {
+            result = true;
+            return true;
+        }
+
+        if (value == "0")
+        {
+            result = false;
+            return true;
+        }
+
+        return bool.TryParse(value, out result);
+    }
+
+    private static string EncodeQuizAnswers(IEnumerable<QuizAnswerSnapshot> answers)
+    {
+        if (answers == null)
+        {
+            return string.Empty;
+        }
+
+        return string.Join(";", answers.Select(answer =>
+            string.Format(
+                CultureInfo.InvariantCulture,
+                "{0},{1},{2:0.000}",
+                answer.PlayerIndex,
+                answer.IsCorrect ? 1 : 0,
+                answer.TimeTaken)));
+    }
+
+    private static List<QuizAnswerSnapshot> DecodeQuizAnswers(string payload)
+    {
+        var decodedAnswers = new List<QuizAnswerSnapshot>();
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            return decodedAnswers;
+        }
+
+        string[] answerEntries = payload.Split(';');
+        foreach (string answerEntry in answerEntries)
+        {
+            if (string.IsNullOrWhiteSpace(answerEntry))
+            {
+                continue;
+            }
+
+            string[] answerParts = answerEntry.Split(',');
+            if (answerParts.Length < 3 ||
+                !int.TryParse(answerParts[0], out int playerIndex) ||
+                !TryParseBooleanFlag(answerParts[1], out bool isCorrect) ||
+                !float.TryParse(answerParts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out float timeTaken))
+            {
+                continue;
+            }
+
+            decodedAnswers.Add(new QuizAnswerSnapshot
+            {
+                PlayerIndex = playerIndex,
+                IsCorrect = isCorrect,
+                TimeTaken = timeTaken
+            });
+        }
+
+        return decodedAnswers;
+    }
+
+    private static string EncodeRewardGemIndices(IEnumerable<int> rewardGemIndices)
+    {
+        if (rewardGemIndices == null)
+        {
+            return string.Empty;
+        }
+
+        return string.Join(",", rewardGemIndices);
+    }
+
+    private static List<int> DecodeRewardGemIndices(string payload)
+    {
+        var rewardGemIndices = new List<int>();
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            return rewardGemIndices;
+        }
+
+        string[] rewardParts = payload.Split(',');
+        foreach (string rewardPart in rewardParts)
+        {
+            if (int.TryParse(rewardPart, out int gemIndex))
+            {
+                rewardGemIndices.Add(gemIndex);
+            }
+        }
+
+        return rewardGemIndices;
     }
 
     private static string GetLocalPlayerName(int fallbackPlayerId)

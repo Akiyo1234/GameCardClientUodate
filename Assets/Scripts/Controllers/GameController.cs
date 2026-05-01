@@ -74,6 +74,7 @@ public class GameController : MonoBehaviour
 
     public bool IsOnlineMatchMode => isOnlineMatchMode;
     public int ActivePlayerCount => activePlayerCount;
+    public int LocalPlayerSeatIndex => GetLocalPlayerUiIndex();
 
     void Awake()
     {

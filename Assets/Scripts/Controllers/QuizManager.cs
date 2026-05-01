@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 using System.Collections.Generic;
@@ -8,23 +8,22 @@ public class QuizManager : MonoBehaviour
 {
     public static QuizManager Instance { get; private set; }
 
-    // โครงสร้างข้อมูลสำหรับ 1 คำถาม
     [System.Serializable]
     public class QuizQuestion
     {
         [TextArea(2, 4)]
         public string questionText;
-        public string[] choices = new string[4]; // ช้อยส์ 4 ข้อ
+        public string[] choices = new string[4];
         [Tooltip("กรอก 0, 1, 2 หรือ 3")]
-        public int correctChoiceIndex; // เฉลยว่าข้อไหนถูก
+        public int correctChoiceIndex;
     }
 
     [System.Serializable]
     public class PlayerAnswer
     {
-        public int playerIndex; 
-        public bool isCorrect;  
-        public float timeTaken; 
+        public int playerIndex;
+        public bool isCorrect;
+        public float timeTaken;
     }
 
     public GameController gameController;
@@ -37,164 +36,207 @@ public class QuizManager : MonoBehaviour
     public GameObject quizPanel;
     public TextMeshProUGUI questionText;
     public TextMeshProUGUI timerText;
-    public Button[] answerButtons; // ใส่ปุ่มทั้ง 4 ปุ่ม
-    public TextMeshProUGUI[] answerChoiceTexts; // ใส่ Text ที่อยู่ในปุ่มทั้ง 4 อัน
-    public TextMeshProUGUI rewardText; // [NEW] แสดงข้อความรางวัล
-    public ResultScreenUI resultScreen; // หน้าต่างสรุปผลอเนกประสงค์
+    public Button[] answerButtons;
+    public TextMeshProUGUI[] answerChoiceTexts;
+    public TextMeshProUGUI rewardText;
+    public ResultScreenUI resultScreen;
 
     [Header("---- ตั้งค่าเวลา ----")]
-    public float timeLimit = 10f; // เวลาตอบ
+    public float timeLimit = 10f;
     private float currentTime;
-    private bool isQuizActive = false;
+    private bool isQuizActive;
+    private bool isWaitingForOnlineResults;
 
-    private List<PlayerAnswer> currentAnswers = new List<PlayerAnswer>();
+    private readonly List<PlayerAnswer> currentAnswers = new List<PlayerAnswer>();
 
     public bool IsQuizActive => isQuizActive;
 
-    void Awake()
+    private void Awake()
     {
-        if (Instance != null && Instance != this) {
+        if (Instance != null && Instance != this)
+        {
             Destroy(gameObject);
             return;
         }
-        Instance = this;
 
-        // ปิดหน้าต่างควิซไว้ก่อนตอนเริ่มเกมเสมอ (ใส่ใน Awake การันตีว่าทำงานแน่นอน)
+        Instance = this;
         if (quizPanel != null) quizPanel.SetActive(false);
     }
 
-    void Update()
+    private void OnEnable()
     {
-        // นับเวลาถอยหลังตอนที่เปิดหน้าควิซ
-    if (isQuizActive)
-        {
-            currentTime -= Time.deltaTime;
-            
-            // ปรับให้โชว์แค่ตัวเลขเพียวๆ
-            if (timerText != null) timerText.text = Mathf.CeilToInt(currentTime).ToString();
+        SubscribeNetworkEvents();
+    }
 
-            if (currentTime <= 0)
-            {
-                ForceEndQuiz(); // หมดเวลาปุ๊บ สรุปผลทันที
-            }
+    private void OnDisable()
+    {
+        UnsubscribeNetworkEvents();
+    }
+
+    private void Update()
+    {
+        if (!isQuizActive)
+        {
+            return;
+        }
+
+        if (isWaitingForOnlineResults && !IsOnlineQuizHost())
+        {
+            if (timerText != null) timerText.text = "WAIT";
+            return;
+        }
+
+        currentTime -= Time.deltaTime;
+        if (timerText != null) timerText.text = Mathf.Max(0, Mathf.CeilToInt(currentTime)).ToString();
+
+        if (currentTime > 0f)
+        {
+            return;
+        }
+
+        if (IsOnlineQuizMode())
+        {
+            HandleOnlineQuizTimeout();
+        }
+        else
+        {
+            ForceEndQuiz();
         }
     }
-    // =====================================
-    // ระบบควบคุมควิซ
-    // =====================================
 
-    // ฟังก์ชันนี้เอาไว้เรียกใช้ตอนจะให้หน้าต่างคำถามเด้งขึ้นมา
     public void StartQuiz()
     {
-        if (questionDatabase.Count == 0) 
+        SubscribeNetworkEvents();
+
+        if (questionDatabase == null || questionDatabase.Count == 0)
         {
             Debug.LogError("ยังไม่ได้ใส่คำถามใน Database!");
             return;
         }
 
-        // 1. สุ่มคำถาม 1 ข้อจากคลัง
-        int rand = Random.Range(0, questionDatabase.Count);
-        currentQuestion = questionDatabase[rand];
-
-        // 2. จัดหน้าตา UI
-        questionText.text = currentQuestion.questionText;
-        for (int i = 0; i < 4; i++)
+        if (IsOnlineQuizMode())
         {
-            answerChoiceTexts[i].text = currentQuestion.choices[i];
-            answerButtons[i].interactable = true; // เปิดให้กดได้
+            if (IsOnlineQuizHost())
+            {
+                int questionIndex = Random.Range(0, questionDatabase.Count);
+                StartQuizInternal(questionIndex);
+                FusionManager.Instance.SendQuizStart(questionIndex);
+            }
+            else
+            {
+                PrepareClientWaitingForQuizStart();
+            }
+
+            return;
         }
 
-        currentAnswers.Clear();
-        currentTime = timeLimit;
-        isQuizActive = true;
-        if (gameController != null) gameController.SetGameplayInputLocked(true);
-        if (quizPanel != null) quizPanel.SetActive(true);
-        
-        if (rewardText != null) {
-            rewardText.text = "รางวัลอันดับ 1: สุ่มไอเทม 3 ชิ้น (RAM, CPU, Security ฯลฯ)";
-        }
-
-        Debug.Log($"<color=white>เปิดควิซ: {currentQuestion.questionText}</color>");
+        StartQuizInternal(Random.Range(0, questionDatabase.Count));
     }
 
-    // ฟังก์ชันรับคำตอบจากปุ่มบนจอ (เราคือ Player 1 = Index 0)
     public void OnClickAnswer(int choiceIndex)
     {
-        if (!isQuizActive) return;
+        if (!isQuizActive || isWaitingForOnlineResults || currentQuestion == null)
+        {
+            return;
+        }
 
-        int myIndex = (gameController != null) ? gameController.playOrder[gameController.currentPlayerIndex] : 0;
-        float timeUsed = timeLimit - currentTime;
-        bool correct = (choiceIndex == currentQuestion.correctChoiceIndex);
+        int myIndex = gameController != null ? gameController.LocalPlayerSeatIndex : 0;
+        if (currentAnswers.Any(answer => answer.playerIndex == myIndex))
+        {
+            return;
+        }
 
-        Debug.Log($"<color=yellow>[Quiz] คุณตอบข้อ: {choiceIndex} | เฉลยคือ: {currentQuestion.correctChoiceIndex} | ผลลัพธ์: {(correct ? "ถูก" : "ผิด")}</color>");
+        float timeUsed = Mathf.Clamp(timeLimit - currentTime, 0f, timeLimit);
+        bool correct = choiceIndex == currentQuestion.correctChoiceIndex;
 
-        // บันทึกคำตอบของเรา
-        currentAnswers.Add(new PlayerAnswer { 
-            playerIndex = myIndex, 
-            isCorrect = correct, 
-            timeTaken = timeUsed 
-        });
+        Debug.Log($"<color=yellow>[Quiz] Player {myIndex + 1} answered {choiceIndex}. Correct answer is {currentQuestion.correctChoiceIndex}. Result: {(correct ? "correct" : "wrong")}</color>");
 
-        // ปิดปุ่ม เพื่อไม่ให้กดซ้ำ
-        foreach(var btn in answerButtons) btn.interactable = false;
+        UpsertAnswer(myIndex, correct, timeUsed);
+        DisableAnswerButtons();
 
-        // [Restore] เริ่มกระบวนการสรุปผลทันที (หรือรอสักครู่เพื่อความตื่นเต้น)
+        if (IsOnlineQuizMode())
+        {
+            if (IsOnlineQuizHost())
+            {
+                if (HaveAllPlayersAnswered())
+                {
+                    ForceEndQuiz();
+                }
+            }
+            else
+            {
+                FusionManager.Instance?.SendQuizAnswer(myIndex, correct, timeUsed);
+                BeginWaitingForOnlineResults();
+            }
+
+            return;
+        }
+
         StartCoroutine(WaitAndFinishQuiz());
     }
 
     private System.Collections.IEnumerator WaitAndFinishQuiz()
     {
-        // รอ 1-2 วินาทีให้ผู้เล่นเห็นสิ่งที่ตัวเองกด
         yield return new WaitForSeconds(1.0f);
-        
-        // จำลองบอทตอบ (ถ้าต้องการความรวดเร็วให้ใช้ค่าสั้นๆ)
+
         if (gameController == null || !gameController.IsOnlineMatchMode)
         {
-            SimulateOtherPlayers(gameController != null ? gameController.playOrder[gameController.currentPlayerIndex] : 0);
+            SimulateOtherPlayers(gameController != null ? gameController.LocalPlayerSeatIndex : 0);
         }
-        
+
         ForceEndQuiz();
     }
-
 
     private void SimulateOtherPlayers(int excludeIndex)
     {
         int totalPlayers = GetTotalPlayersForQuiz();
         for (int i = 0; i < totalPlayers; i++)
         {
-            if (i == excludeIndex) continue; // ข้ามตัวเราเอง
+            if (i == excludeIndex)
+            {
+                continue;
+            }
 
-            // บอทแต่ละตัวจะมีความฉลาดและเร็วต่างกัน
             float botDifficulty = Random.Range(0.4f, 0.8f);
             float botSpeed = Random.Range(1.0f, timeLimit);
-
-            currentAnswers.Add(new PlayerAnswer {
-                playerIndex = i,
-                isCorrect = (Random.value < botDifficulty), 
-                timeTaken = botSpeed
-            });
+            UpsertAnswer(i, Random.value < botDifficulty, botSpeed);
         }
     }
 
     private void ForceEndQuiz()
     {
+        if (IsOnlineQuizMode() && !IsOnlineQuizHost())
+        {
+            return;
+        }
+
         isQuizActive = false;
+        isWaitingForOnlineResults = false;
         if (gameController != null) gameController.SetGameplayInputLocked(false);
         if (quizPanel != null) quizPanel.SetActive(false);
 
         if (currentAnswers.Count == 0)
         {
             Debug.Log("<color=red>หมดเวลา! ไม่มีใครตอบเลย</color>");
-            return;
         }
 
-        ProcessQuizResults(currentAnswers);
+        List<int> rewardGemIndices = DetermineRewardGemIndices(currentAnswers);
+        ProcessQuizResults(currentAnswers, rewardGemIndices);
+
+        if (IsOnlineQuizHost() && FusionManager.Instance != null)
+        {
+            FusionManager.Instance.SendQuizResults(
+                currentAnswers.Select(answer => new FusionManager.QuizAnswerSnapshot
+                {
+                    PlayerIndex = answer.playerIndex,
+                    IsCorrect = answer.isCorrect,
+                    TimeTaken = answer.timeTaken
+                }),
+                rewardGemIndices);
+        }
     }
 
-    // =====================================
-    // ระบบคำนวณและแจกของ (คงเดิมเป๊ะๆ)
-    // =====================================
-    public void ProcessQuizResults(List<PlayerAnswer> answers)
+    public void ProcessQuizResults(List<PlayerAnswer> answers, List<int> forcedRewardGemIndices = null)
     {
         int totalPlayers = GetTotalPlayersForQuiz();
         if (totalPlayers <= 0)
@@ -203,54 +245,27 @@ public class QuizManager : MonoBehaviour
             return;
         }
 
-        var normalizedAnswers = answers
-            .Where(a => a != null)
-            .GroupBy(a => a.playerIndex)
-            .Select(group => group
-                .OrderByDescending(a => a.isCorrect)
-                .ThenBy(a => a.timeTaken)
-                .First())
-            .ToList();
-
-        for (int i = 0; i < totalPlayers; i++)
-        {
-            bool alreadyAnswered = normalizedAnswers.Any(a => a.playerIndex == i);
-            if (alreadyAnswered)
-            {
-                continue;
-            }
-
-            normalizedAnswers.Add(new PlayerAnswer
-            {
-                playerIndex = i,
-                isCorrect = false,
-                timeTaken = timeLimit + 999f
-            });
-        }
-
-        var rankedPlayers = normalizedAnswers
-            .OrderByDescending(a => a.isCorrect)
-            .ThenBy(a => a.timeTaken)
-            .ToList();
+        List<PlayerAnswer> rankedPlayers = BuildRankedPlayers(answers, totalPlayers);
 
         Debug.Log("\n<color=yellow>=== สรุปผลการตอบคำถาม ===</color>");
         for (int i = 0; i < rankedPlayers.Count; i++)
         {
-            var p = rankedPlayers[i];
-            Debug.Log($"อันดับ {i + 1}: ผู้เล่น {p.playerIndex + 1}  ตอบถูก: {p.isCorrect}  เวลา: {p.timeTaken:F2} s");
+            PlayerAnswer answer = rankedPlayers[i];
+            Debug.Log($"อันดับ {i + 1}: ผู้เล่น {answer.playerIndex + 1} ตอบถูก: {answer.isCorrect} เวลา: {answer.timeTaken:F2} s");
         }
 
-        var winner = rankedPlayers[0];
+        PlayerAnswer winner = rankedPlayers[0];
         bool hasWinner = winner.isCorrect;
 
         if (hasWinner)
         {
-            string rewardMsg = GiveRandomGems(winner.playerIndex, 3);
-            Debug.Log($"<color=green>🎉 ผู้เล่น {winner.playerIndex + 1} ชนะควิซ! {rewardMsg}</color>");
-            
-            if (rewardText != null) {
-                string pName = gameController.players[winner.playerIndex].nameText.text;
-                rewardText.text = $"ผู้ชนะ: {pName}\n{rewardMsg}";
+            string rewardMessage = ApplyRewardGemIndices(winner.playerIndex, forcedRewardGemIndices ?? new List<int>());
+            Debug.Log($"<color=green>ผู้เล่น {winner.playerIndex + 1} ชนะควิซ! {rewardMessage}</color>");
+
+            if (rewardText != null)
+            {
+                string playerName = GetPlayerName(winner.playerIndex);
+                rewardText.text = $"ผู้ชนะ: {playerName}\n{rewardMessage}";
             }
         }
         else
@@ -265,28 +280,295 @@ public class QuizManager : MonoBehaviour
             newTurnOrder[i] = rankedPlayers[i].playerIndex;
         }
 
-        if (resultScreen != null)
+        if (resultScreen != null && gameController != null)
         {
             gameController.SetWaitingForContinueAfterResult(true);
         }
 
-        gameController.ApplyNewTurnOrder(newTurnOrder);
+        gameController?.ApplyNewTurnOrder(newTurnOrder);
 
-        // โชว์หน้าสรุปผลตอนได้รับลำดับการเล่นใหม่ พร้อมบอกให้จุดพลุถ้ามีคนชนะ!
         if (resultScreen != null)
         {
             List<string> rankings = new List<string>();
-            foreach (var p in rankedPlayers)
+            foreach (PlayerAnswer answer in rankedPlayers)
             {
-                string pName = gameController.players[p.playerIndex].nameText.text;
-                if (string.IsNullOrEmpty(pName) || pName.Trim() == "") {
-                    pName = "Player " + (p.playerIndex + 1);
-                }
-                string status = p.isCorrect ? "ถูก" : "ผิด";
-                rankings.Add($"{pName} ({status} - {p.timeTaken:F2}s)");
+                string playerName = GetPlayerName(answer.playerIndex);
+                string status = answer.isCorrect ? "ถูก" : "ผิด";
+                rankings.Add($"{playerName} ({status} - {answer.timeTaken:F2}s)");
             }
 
             resultScreen.ShowResults("สรุปลำดับการเล่นรอบนี้", rankings, false, hasWinner);
+        }
+    }
+
+    private void StartQuizInternal(int questionIndex)
+    {
+        if (questionDatabase == null || questionDatabase.Count == 0)
+        {
+            return;
+        }
+
+        int safeQuestionIndex = Mathf.Clamp(questionIndex, 0, questionDatabase.Count - 1);
+        currentQuestion = questionDatabase[safeQuestionIndex];
+        currentAnswers.Clear();
+        currentTime = timeLimit;
+        isQuizActive = true;
+        isWaitingForOnlineResults = false;
+
+        if (questionText != null) questionText.text = currentQuestion.questionText;
+
+        for (int i = 0; i < answerButtons.Length; i++)
+        {
+            if (i < answerChoiceTexts.Length && answerChoiceTexts[i] != null && i < currentQuestion.choices.Length)
+            {
+                answerChoiceTexts[i].text = currentQuestion.choices[i];
+            }
+
+            if (answerButtons[i] != null)
+            {
+                answerButtons[i].interactable = true;
+            }
+        }
+
+        if (timerText != null) timerText.text = Mathf.CeilToInt(currentTime).ToString();
+        if (rewardText != null) rewardText.text = "รางวัลอันดับ 1: สุ่มไอเทม 3 ชิ้น";
+        if (gameController != null) gameController.SetGameplayInputLocked(true);
+        if (quizPanel != null) quizPanel.SetActive(true);
+
+        Debug.Log($"<color=white>เปิดควิซ: {currentQuestion.questionText}</color>");
+    }
+
+    private void PrepareClientWaitingForQuizStart()
+    {
+        isQuizActive = false;
+        isWaitingForOnlineResults = false;
+        if (gameController != null) gameController.SetGameplayInputLocked(true);
+        if (quizPanel != null) quizPanel.SetActive(false);
+        if (timerText != null) timerText.text = string.Empty;
+    }
+
+    private void BeginWaitingForOnlineResults()
+    {
+        isWaitingForOnlineResults = true;
+        DisableAnswerButtons();
+        if (timerText != null) timerText.text = "WAIT";
+    }
+
+    private void HandleOnlineQuizTimeout()
+    {
+        if (IsOnlineQuizHost())
+        {
+            ForceEndQuiz();
+            return;
+        }
+
+        BeginWaitingForOnlineResults();
+    }
+
+    private void HandleRemoteQuizStarted(int questionIndex)
+    {
+        if (!IsOnlineQuizMode())
+        {
+            return;
+        }
+
+        StartQuizInternal(questionIndex);
+    }
+
+    private void HandleRemoteQuizAnswer(FusionManager.QuizAnswerSnapshot answerSnapshot)
+    {
+        if (!IsOnlineQuizHost() || !isQuizActive)
+        {
+            return;
+        }
+
+        UpsertAnswer(answerSnapshot.PlayerIndex, answerSnapshot.IsCorrect, answerSnapshot.TimeTaken);
+        if (HaveAllPlayersAnswered())
+        {
+            ForceEndQuiz();
+        }
+    }
+
+    private void HandleRemoteQuizResults(List<FusionManager.QuizAnswerSnapshot> answerSnapshots, List<int> rewardGemIndices)
+    {
+        if (!IsOnlineQuizMode())
+        {
+            return;
+        }
+
+        isQuizActive = false;
+        isWaitingForOnlineResults = false;
+        if (gameController != null) gameController.SetGameplayInputLocked(false);
+        if (quizPanel != null) quizPanel.SetActive(false);
+
+        List<PlayerAnswer> syncedAnswers = answerSnapshots
+            .Select(answerSnapshot => new PlayerAnswer
+            {
+                playerIndex = answerSnapshot.PlayerIndex,
+                isCorrect = answerSnapshot.IsCorrect,
+                timeTaken = answerSnapshot.TimeTaken
+            })
+            .ToList();
+
+        ProcessQuizResults(syncedAnswers, rewardGemIndices);
+    }
+
+    private void UpsertAnswer(int playerIndex, bool isCorrect, float timeTaken)
+    {
+        PlayerAnswer existingAnswer = currentAnswers.FirstOrDefault(answer => answer.playerIndex == playerIndex);
+        if (existingAnswer != null)
+        {
+            existingAnswer.isCorrect = isCorrect;
+            existingAnswer.timeTaken = timeTaken;
+            return;
+        }
+
+        currentAnswers.Add(new PlayerAnswer
+        {
+            playerIndex = playerIndex,
+            isCorrect = isCorrect,
+            timeTaken = timeTaken
+        });
+    }
+
+    private bool HaveAllPlayersAnswered()
+    {
+        return currentAnswers
+            .Select(answer => answer.playerIndex)
+            .Distinct()
+            .Count() >= GetTotalPlayersForQuiz();
+    }
+
+    private List<PlayerAnswer> BuildRankedPlayers(List<PlayerAnswer> answers, int totalPlayers)
+    {
+        List<PlayerAnswer> normalizedAnswers = (answers ?? new List<PlayerAnswer>())
+            .Where(answer => answer != null)
+            .GroupBy(answer => answer.playerIndex)
+            .Select(group => group
+                .OrderByDescending(answer => answer.isCorrect)
+                .ThenBy(answer => answer.timeTaken)
+                .First())
+            .ToList();
+
+        for (int i = 0; i < totalPlayers; i++)
+        {
+            bool alreadyAnswered = normalizedAnswers.Any(answer => answer.playerIndex == i);
+            if (alreadyAnswered)
+            {
+                continue;
+            }
+
+            normalizedAnswers.Add(new PlayerAnswer
+            {
+                playerIndex = i,
+                isCorrect = false,
+                timeTaken = timeLimit + 999f
+            });
+        }
+
+        return normalizedAnswers
+            .OrderByDescending(answer => answer.isCorrect)
+            .ThenBy(answer => answer.timeTaken)
+            .ToList();
+    }
+
+    private List<int> DetermineRewardGemIndices(List<PlayerAnswer> answers)
+    {
+        int totalPlayers = GetTotalPlayersForQuiz();
+        if (gameController == null || totalPlayers <= 0)
+        {
+            return new List<int>();
+        }
+
+        List<PlayerAnswer> rankedPlayers = BuildRankedPlayers(answers, totalPlayers);
+        if (rankedPlayers.Count == 0 || !rankedPlayers[0].isCorrect)
+        {
+            return new List<int>();
+        }
+
+        int[] simulatedBank = (int[])gameController.bankCoins.Clone();
+        List<int> rewardGemIndices = new List<int>();
+
+        for (int i = 0; i < 3; i++)
+        {
+            List<int> availableGemIndices = new List<int>();
+            for (int gemIndex = 0; gemIndex < 5; gemIndex++)
+            {
+                if (simulatedBank[gemIndex] > 0)
+                {
+                    availableGemIndices.Add(gemIndex);
+                }
+            }
+
+            if (availableGemIndices.Count == 0)
+            {
+                break;
+            }
+
+            int selectedGemIndex = availableGemIndices[Random.Range(0, availableGemIndices.Count)];
+            simulatedBank[selectedGemIndex]--;
+            rewardGemIndices.Add(selectedGemIndex);
+        }
+
+        return rewardGemIndices;
+    }
+
+    private string ApplyRewardGemIndices(int playerIndex, List<int> rewardGemIndices)
+    {
+        if (gameController == null || playerIndex < 0 || playerIndex >= gameController.players.Length)
+        {
+            return "ล้มเหลว";
+        }
+
+        PlayerUI winnerUI = gameController.players[playerIndex];
+        Dictionary<string, int> receivedGems = new Dictionary<string, int>();
+
+        foreach (int gemIndex in rewardGemIndices ?? new List<int>())
+        {
+            if (gemIndex < 0 || gemIndex >= 5 || gameController.bankCoins[gemIndex] <= 0)
+            {
+                continue;
+            }
+
+            gameController.bankCoins[gemIndex]--;
+            winnerUI.coins[gemIndex]++;
+
+            string gemName = GetGemName(gemIndex);
+            if (receivedGems.ContainsKey(gemName))
+            {
+                receivedGems[gemName]++;
+            }
+            else
+            {
+                receivedGems[gemName] = 1;
+            }
+        }
+
+        winnerUI.UpdateUI();
+        gameController.UpdateBankUI();
+
+        if (receivedGems.Count == 0)
+        {
+            return "ไม่ได้รับไอเทมเพิ่ม";
+        }
+
+        List<string> parts = new List<string>();
+        foreach (KeyValuePair<string, int> pair in receivedGems)
+        {
+            parts.Add($"{pair.Key} {pair.Value}");
+        }
+
+        return "ได้รับ " + string.Join(" / ", parts);
+    }
+
+    private void DisableAnswerButtons()
+    {
+        foreach (Button answerButton in answerButtons)
+        {
+            if (answerButton != null)
+            {
+                answerButton.interactable = false;
+            }
         }
     }
 
@@ -300,41 +582,62 @@ public class QuizManager : MonoBehaviour
         return 4;
     }
 
-    private string GiveRandomGems(int playerIndex, int amount)
+    private string GetPlayerName(int playerIndex)
     {
-        if (gameController == null) return "ล้มเหลว";
-        PlayerUI winnerUI = gameController.players[playerIndex];
-
-        Dictionary<string, int> receivedGems = new Dictionary<string, int>();
-
-        for (int i = 0; i < amount; i++)
+        if (gameController == null || playerIndex < 0 || playerIndex >= gameController.players.Length)
         {
-            int randomGem = Random.Range(0, 5); 
-            if (gameController.bankCoins[randomGem] > 0)
-            {
-                gameController.bankCoins[randomGem]--;
-                winnerUI.coins[randomGem]++;
-
-                string gemName = GetGemName(randomGem);
-                if (receivedGems.ContainsKey(gemName)) receivedGems[gemName]++;
-                else receivedGems[gemName] = 1;
-            }
+            return "Player " + (playerIndex + 1);
         }
 
-        winnerUI.UpdateUI();
-        gameController.UpdateBankUI();
+        string playerName = gameController.players[playerIndex].nameText != null
+            ? gameController.players[playerIndex].nameText.text
+            : string.Empty;
 
-        // สร้างข้อความสรุป: "ได้รับ RAM 1 / CPU 2"
-        List<string> parts = new List<string>();
-        foreach (var pair in receivedGems) {
-            parts.Add($"{pair.Key} {pair.Value}");
-        }
-        
-        return "ได้รับ " + string.Join(" / ", parts);
+        return string.IsNullOrWhiteSpace(playerName) ? "Player " + (playerIndex + 1) : playerName;
     }
 
-    private string GetGemName(int index) {
-        switch(index) {
+    private bool IsOnlineQuizMode()
+    {
+        return gameController != null && gameController.IsOnlineMatchMode && FusionManager.Instance != null;
+    }
+
+    private bool IsOnlineQuizHost()
+    {
+        return IsOnlineQuizMode() && FusionManager.Instance.IsMasterClient;
+    }
+
+    private void SubscribeNetworkEvents()
+    {
+        if (FusionManager.Instance == null)
+        {
+            return;
+        }
+
+        FusionManager.Instance.QuizStartedReceived -= HandleRemoteQuizStarted;
+        FusionManager.Instance.QuizAnswerReceived -= HandleRemoteQuizAnswer;
+        FusionManager.Instance.QuizResultsReceived -= HandleRemoteQuizResults;
+
+        FusionManager.Instance.QuizStartedReceived += HandleRemoteQuizStarted;
+        FusionManager.Instance.QuizAnswerReceived += HandleRemoteQuizAnswer;
+        FusionManager.Instance.QuizResultsReceived += HandleRemoteQuizResults;
+    }
+
+    private void UnsubscribeNetworkEvents()
+    {
+        if (FusionManager.Instance == null)
+        {
+            return;
+        }
+
+        FusionManager.Instance.QuizStartedReceived -= HandleRemoteQuizStarted;
+        FusionManager.Instance.QuizAnswerReceived -= HandleRemoteQuizAnswer;
+        FusionManager.Instance.QuizResultsReceived -= HandleRemoteQuizResults;
+    }
+
+    private string GetGemName(int index)
+    {
+        switch (index)
+        {
             case 0: return "CPU";
             case 1: return "RAM";
             case 2: return "Network";
