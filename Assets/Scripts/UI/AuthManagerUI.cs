@@ -132,25 +132,32 @@ public class AuthManagerUI : MonoBehaviour
     public void OpenRegisterWebPage()
     {
         string finalUrl = registerUrl;
+        string fallbackHtmlPath = Path.Combine(Application.dataPath, "StreamingAssets", "Web", "index.html");
 
         if (string.IsNullOrWhiteSpace(finalUrl))
         {
-            string htmlPath = Path.Combine(Application.dataPath, "StreamingAssets", "Web", "index.html");
-            if (!File.Exists(htmlPath))
+            if (!File.Exists(fallbackHtmlPath))
             {
-                Debug.LogError($"[AuthManagerUI] Register HTML not found: {htmlPath}");
+                Debug.LogError($"[AuthManagerUI] Register HTML not found: {fallbackHtmlPath}");
                 return;
             }
 
-            finalUrl = new Uri(htmlPath).AbsoluteUri;
+            finalUrl = new Uri(fallbackHtmlPath).AbsoluteUri;
         }
         else if (finalUrl.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
         {
             string localPath = new Uri(finalUrl).LocalPath;
             if (!File.Exists(localPath))
             {
-                Debug.LogError($"[AuthManagerUI] Register file URL points to a missing file: {localPath}");
-                return;
+                Debug.LogWarning($"[AuthManagerUI] Register file URL points to a missing file, falling back to project HTML: {localPath}");
+
+                if (!File.Exists(fallbackHtmlPath))
+                {
+                    Debug.LogError($"[AuthManagerUI] Register HTML not found: {fallbackHtmlPath}");
+                    return;
+                }
+
+                finalUrl = new Uri(fallbackHtmlPath).AbsoluteUri;
             }
         }
 
