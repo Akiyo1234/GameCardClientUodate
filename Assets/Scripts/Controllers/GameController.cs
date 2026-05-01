@@ -287,6 +287,7 @@ public class GameController : MonoBehaviour
         }
 
         ApplyEconomySnapshot(snapshot);
+        EvaluateWinCondition();
     }
 
     void SetupNobles()
@@ -799,9 +800,14 @@ public class GameController : MonoBehaviour
         PlayerUI p = players[playOrder[currentPlayerIndex]];
         CheckNobles(p);
 
+        if (isOnlineMatchMode)
+        {
+            PublishOnlineEconomyState();
+        }
+
         // ตรวจสอบการชนะเกม "ทันที" ในทุกๆ เทิร์น!
         // (เดิมทีเช็คเฉพาะตอนจบรอบ ทำให้แต้มถึง 20 แล้วยังรันเทิร์นต่อไปหาบอท)
-        CheckWinCondition();
+        EvaluateWinCondition();
         if (isGameOver) return; // ปิดจ๊อบ ออกจากฟังก์ชันทันทีถ้ามีคนชนะ
 
         totalTurnCount++;
@@ -842,8 +848,18 @@ public class GameController : MonoBehaviour
         }
     }
 
+    public void EvaluateWinCondition()
+    {
+        CheckWinCondition();
+    }
+
     void CheckWinCondition() 
     {
+        if (isGameOver)
+        {
+            return;
+        }
+
         PlayerUI winner = null; 
         int highestScore = 0;
         
@@ -858,13 +874,17 @@ public class GameController : MonoBehaviour
             isGameOver = true;
             
             // --- บันทึกสถิติ Coins และ Points เก็บไว้แสดงที่หน้า Main Menu ---
-            if (!players[0].isBot) // เช็คให้ชัวร์ว่า Player 0 คือคน ไม่ใช่บอท
+            int localSeatIndex = GetLocalPlayerUiIndex();
+            if (localSeatIndex >= 0 &&
+                localSeatIndex < players.Length &&
+                players[localSeatIndex] != null &&
+                !players[localSeatIndex].isBot)
             {
                 int currentTotalCoins = PlayerPrefs.GetInt("TotalCoins", 0);
                 int currentTotalPoints = PlayerPrefs.GetInt("TotalPoints", 0);
                 
-                int earnedCoins = GetTotalPlayerCoins(0); // เหรียญที่ player 1 หามาได้
-                int earnedPoints = players[0].currentScore; // คะแนนวิคตอรี่พอยต์
+                int earnedCoins = GetTotalPlayerCoins(localSeatIndex);
+                int earnedPoints = players[localSeatIndex].currentScore;
 
                 PlayerPrefs.SetInt("TotalCoins", currentTotalCoins + earnedCoins);
                 PlayerPrefs.SetInt("TotalPoints", currentTotalPoints + earnedPoints);

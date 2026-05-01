@@ -228,6 +228,7 @@ public class QuizManager : MonoBehaviour
         List<int> rewardGemIndices = DetermineRewardGemIndices(currentAnswers);
         ProcessQuizResults(currentAnswers, rewardGemIndices);
         gameController?.PublishOnlineEconomyState();
+        gameController?.EvaluateWinCondition();
 
         if (IsOnlineQuizHost() && FusionManager.Instance != null)
         {
