@@ -5,6 +5,8 @@ using TMPro;
 
 public class GameController : MonoBehaviour
 {
+    private const int MaxRemoteHumanSlots = 3;
+
     [Header("---- Board & Prefabs ----")]
     public Transform tier3Container; 
     public Transform tier2Container; 
@@ -67,6 +69,11 @@ public class GameController : MonoBehaviour
 
     void Awake()
     {
+        if (FusionManager.Instance != null)
+        {
+            FusionManager.Instance.PlayerNamesUpdated += ApplyNetworkPlayerNamesToUi;
+        }
+
         EnsureBotController();
         // Setup UI ทุกอย่างก่อน เสมอ ไม่ว่าจะมี cardPrefab หรือไม่
         if (confirmReservePanel != null) confirmReservePanel.SetActive(false);
@@ -133,6 +140,7 @@ public class GameController : MonoBehaviour
 
     void Start()
     {
+        ApplyNetworkPlayerNamesToUi();
         UpdateTurnCountUI(); // อัปเดตเลขเทิร์นเริ่มต้น (เทิร์นที่ 1)
 
         // ย้ายการเรียกควิซมาที่ Start เพื่อให้แน่ใจว่า QuizManager พร้อมทำงานแล้ว
@@ -143,6 +151,14 @@ public class GameController : MonoBehaviour
         else
         {
             ScheduleBotTurnIfNeeded();
+        }
+    }
+
+    void OnDestroy()
+    {
+        if (FusionManager.Instance != null)
+        {
+            FusionManager.Instance.PlayerNamesUpdated -= ApplyNetworkPlayerNamesToUi;
         }
     }
 
@@ -892,17 +908,38 @@ public class GameController : MonoBehaviour
         List<CharacterData> remainingChars = new List<CharacterData>(availableCharacters);
         remainingChars.Remove(p1Data);
 
+        int humanPlayerCount = 1;
+        if (FusionManager.Instance != null && FusionManager.Instance.ActivePlayerCount >= 2)
+        {
+            humanPlayerCount = Mathf.Clamp(FusionManager.Instance.ActivePlayerCount, 2, players.Length);
+            Debug.Log($"[GameController] Multiplayer room detected. Human player count={humanPlayerCount}");
+        }
+
         for (int i = 0; i < players.Length; i++) 
         {
             if (players[i] != null) 
             {
-                players[i].isBot = (i > 0); 
+                players[i].isBot = (i >= humanPlayerCount); 
                 string finalName = "Player " + (i + 1); // บังคับเป็น Player 1, 2, 3, 4 ไว้ก่อน
 
                 if (!players[i].isBot) {
-                    finalName = humanName;
-                    if (players[i].characterPortrait != null) players[i].characterPortrait.sprite = p1Data.portraitSprite;
-                    Debug.Log($"[GameController] Player 1 setup as: {finalName} with character {p1Data.characterName}");
+                    if (i == 0)
+                    {
+                        finalName = humanName;
+                        if (players[i].characterPortrait != null) players[i].characterPortrait.sprite = p1Data.portraitSprite;
+                        Debug.Log($"[GameController] Local player setup as: {finalName} with character {p1Data.characterName}");
+                    }
+                    else
+                    {
+                        finalName = GetOnlinePlayerDisplayName(i - 1, i + 1);
+                        if (remainingChars.Count > 0) {
+                            int r = Random.Range(0, remainingChars.Count);
+                            CharacterData remoteData = remainingChars[r];
+                            if (players[i].characterPortrait != null) players[i].characterPortrait.sprite = remoteData.portraitSprite;
+                            remainingChars.RemoveAt(r);
+                        }
+                        Debug.Log($"[GameController] Remote player slot {i + 1} configured as human.");
+                    }
                 } else {
                     // บอท: ลองหาชื่อจากไฟล์ตัวละคร ถ้าไม่มีให้ใช้ "Player X"
                     if (remainingChars.Count > 0) {
@@ -921,6 +958,47 @@ public class GameController : MonoBehaviour
     void ClearContainer(Transform c) { 
         if (c == null) return; 
         foreach (Transform child in c) Destroy(child.gameObject); 
+    }
+
+    private void ApplyNetworkPlayerNamesToUi()
+    {
+        if (players == null || FusionManager.Instance == null)
+        {
+            return;
+        }
+
+        for (int remoteIndex = 0; remoteIndex < MaxRemoteHumanSlots; remoteIndex++)
+        {
+            int playerSlot = remoteIndex + 1;
+            if (playerSlot >= players.Length || players[playerSlot] == null || players[playerSlot].isBot)
+            {
+                continue;
+            }
+
+            string remoteName = FusionManager.Instance.GetRemotePlayerName(remoteIndex);
+            if (string.IsNullOrWhiteSpace(remoteName))
+            {
+                continue;
+            }
+
+            if (players[playerSlot].nameText != null)
+            {
+                players[playerSlot].nameText.text = remoteName;
+            }
+
+            Debug.Log($"[GameController] Updated remote player slot {playerSlot + 1} name to {remoteName}");
+        }
+    }
+
+    private string GetOnlinePlayerDisplayName(int remoteIndex, int slotNumber)
+    {
+        if (FusionManager.Instance == null)
+        {
+            return "Online Player " + slotNumber;
+        }
+
+        string remoteName = FusionManager.Instance.GetRemotePlayerName(remoteIndex);
+        return string.IsNullOrWhiteSpace(remoteName) ? "Online Player " + slotNumber : remoteName;
     }
 
     // [NEW] อัปเดตตัวเลขเทิร์นบน UI
