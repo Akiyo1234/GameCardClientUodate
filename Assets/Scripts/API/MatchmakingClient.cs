@@ -21,6 +21,9 @@ public class MatchmakingClient : MonoBehaviour
     [SerializeField] private string gameSceneName = "SampleScene";
     [SerializeField] private float pollIntervalSeconds = 1.5f;
 
+    [Header("Queue Safety")]
+    [SerializeField] private float staleWaitingTimeoutSeconds = 300f;
+
     [Header("UI")]
     [SerializeField] private TextMeshProUGUI statusText;
 
@@ -174,6 +177,8 @@ public class MatchmakingClient : MonoBehaviour
             return null;
         }
 
+        await ExpireStaleWaitingEntriesAsync(client);
+
         var existingWaitingEntry = await GetLatestWaitingQueueEntryAsync(client);
         if (existingWaitingEntry != null)
         {
@@ -282,6 +287,8 @@ public class MatchmakingClient : MonoBehaviour
             return currentEntry;
         }
 
+        await ExpireStaleWaitingEntriesAsync(client);
+
         var waitingEntries = await GetTopWaitingEntriesAsync(client);
         if (waitingEntries.Count < 2)
         {
@@ -348,7 +355,7 @@ public class MatchmakingClient : MonoBehaviour
             .Get();
 
         return waitingResponse.Models
-            .Where(IsWaitingEntry)
+            .Where(IsFreshWaitingEntry)
             .GroupBy(x => x.PlayerId, StringComparer.OrdinalIgnoreCase)
             .Select(group => group
                 .OrderBy(x => x.CreatedAt)
@@ -382,7 +389,7 @@ public class MatchmakingClient : MonoBehaviour
             .Limit(1)
             .Get();
 
-        return response.Models.FirstOrDefault();
+        return response.Models.FirstOrDefault(IsFreshWaitingEntry);
     }
 
     private async Task<List<MatchmakingQueueData>> GetWaitingEntriesForCurrentPlayerAsync(Supabase.Client client)
@@ -502,6 +509,48 @@ public class MatchmakingClient : MonoBehaviour
     private static bool IsWaitingEntry(MatchmakingQueueData entry)
     {
         return entry != null && string.Equals(entry.Status, WaitingStatus, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool IsFreshWaitingEntry(MatchmakingQueueData entry)
+    {
+        if (!IsWaitingEntry(entry))
+        {
+            return false;
+        }
+
+        DateTime cutoffUtc = GetWaitingCutoffUtc();
+        return entry.CreatedAt >= cutoffUtc;
+    }
+
+    private DateTime GetWaitingCutoffUtc()
+    {
+        float timeoutSeconds = Mathf.Max(30f, staleWaitingTimeoutSeconds);
+        return DateTime.UtcNow.AddSeconds(-timeoutSeconds);
+    }
+
+    private async Task ExpireStaleWaitingEntriesAsync(Supabase.Client client)
+    {
+        DateTime cutoffUtc = GetWaitingCutoffUtc();
+        var waitingResponse = await client
+            .From<MatchmakingQueueData>()
+            .Where(x => x.Status == WaitingStatus)
+            .Order(x => x.CreatedAt, Postgrest.Constants.Ordering.Ascending)
+            .Limit(20)
+            .Get();
+
+        var staleEntries = waitingResponse.Models
+            .Where(IsWaitingEntry)
+            .Where(x => x.CreatedAt < cutoffUtc)
+            .ToList();
+
+        foreach (var staleEntry in staleEntries)
+        {
+            staleEntry.Status = CancelledStatus;
+            staleEntry.RoomCode = null;
+            staleEntry.MatchedAt = null;
+            await client.From<MatchmakingQueueData>().Update(staleEntry);
+            Debug.Log($"[Matchmaking] Expired stale waiting row. Id={staleEntry.Id}, PlayerId={staleEntry.PlayerId}, CreatedAt={staleEntry.CreatedAt:O}");
+        }
     }
 
     private Supabase.Client GetSupabaseClient()
