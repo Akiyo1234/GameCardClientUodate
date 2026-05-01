@@ -14,3 +14,27 @@ create index if not exists idx_matchmaking_queue_status_created_at
 create unique index if not exists uq_matchmaking_queue_waiting_player
     on public.matchmaking_queue (player_id)
     where status = 'waiting';
+
+alter table public.matchmaking_queue enable row level security;
+
+drop policy if exists "matchmaking_queue_select_all" on public.matchmaking_queue;
+create policy "matchmaking_queue_select_all"
+    on public.matchmaking_queue
+    for select
+    to anon, authenticated
+    using (true);
+
+drop policy if exists "matchmaking_queue_insert_all" on public.matchmaking_queue;
+create policy "matchmaking_queue_insert_all"
+    on public.matchmaking_queue
+    for insert
+    to anon, authenticated
+    with check (true);
+
+drop policy if exists "matchmaking_queue_update_all" on public.matchmaking_queue;
+create policy "matchmaking_queue_update_all"
+    on public.matchmaking_queue
+    for update
+    to anon, authenticated
+    using (true)
+    with check (true);
