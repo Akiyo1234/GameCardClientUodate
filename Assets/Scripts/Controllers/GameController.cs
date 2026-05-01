@@ -5,7 +5,6 @@ using TMPro;
 
 public class GameController : MonoBehaviour
 {
-    private const int MaxRemoteHumanSlots = 3;
     private const int OnlineHumanPlayerCount = 2;
     private const string MatchmakingRoomCodePrefsKey = "MatchmakingRoomCode";
 
@@ -71,6 +70,7 @@ public class GameController : MonoBehaviour
     private bool isOnlineMatchMode;
     private int activePlayerCount = 4;
     private bool hasStartedInitialGameplay;
+    private int localPlayerSlotIndex;
 
     public bool IsOnlineMatchMode => isOnlineMatchMode;
     public int ActivePlayerCount => activePlayerCount;
@@ -84,6 +84,7 @@ public class GameController : MonoBehaviour
         {
             FusionManager.Instance.PlayerNamesUpdated += ApplyNetworkPlayerNamesToUi;
             FusionManager.Instance.ActivePlayersChanged += HandleFusionActivePlayersChanged;
+            FusionManager.Instance.TurnStateReceived += HandleOnlineTurnStateReceived;
         }
 
         EnsureBotController();
@@ -140,14 +141,6 @@ public class GameController : MonoBehaviour
         ResetTimer();
         UpdateTurnVisuals();
         UpdateBankUI();
-
-        // [Phase 3] ดึงชื่อผู้เล่นที่ Login มาแทนที่ Player 1
-        if (SupabaseManager.Instance != null && players.Length > 0 && players[0] != null)
-        {
-            string realName = SupabaseManager.Instance.GetCurrentUsername();
-            players[0].nameText.text = realName;
-            Debug.Log($"[GameController] ยินดีต้อนรับผู้เล่น: {realName}");
-        }
     }
 
     void Start()
@@ -175,6 +168,11 @@ public class GameController : MonoBehaviour
         hasStartedInitialGameplay = true;
         ClearWarning();
 
+        if (isOnlineMatchMode && FusionManager.Instance != null && FusionManager.Instance.IsMasterClient)
+        {
+            PublishOnlineTurnState();
+        }
+
         if (QuizManager.Instance != null)
         {
             Debug.Log("[GameController] Starting first-round quiz.");
@@ -192,6 +190,7 @@ public class GameController : MonoBehaviour
         {
             FusionManager.Instance.PlayerNamesUpdated -= ApplyNetworkPlayerNamesToUi;
             FusionManager.Instance.ActivePlayersChanged -= HandleFusionActivePlayersChanged;
+            FusionManager.Instance.TurnStateReceived -= HandleOnlineTurnStateReceived;
         }
     }
 
@@ -234,6 +233,32 @@ public class GameController : MonoBehaviour
 
         Debug.Log("[GameController] Online players ready. Refreshing PvP setup.");
         StartInitialGameplay();
+    }
+
+    private void HandleOnlineTurnStateReceived(int syncedCurrentPlayerIndex, int syncedRound, int syncedTotalTurnCount, int syncedTurnDisplay)
+    {
+        if (!isOnlineMatchMode)
+        {
+            return;
+        }
+
+        currentPlayerIndex = Mathf.Clamp(syncedCurrentPlayerIndex, 0, Mathf.Max(0, activePlayerCount - 1));
+        currentRound = Mathf.Max(1, syncedRound);
+        totalTurnCount = Mathf.Max(0, syncedTotalTurnCount);
+        currentTurnDisplay = Mathf.Max(1, syncedTurnDisplay);
+
+        ResetTimer();
+        UpdateTurnVisuals();
+        UpdateTurnCountUI();
+        System.Array.Clear(pendingCoins, 0, pendingCoins.Length);
+        foreach (var btn in bankButtons)
+        {
+            if (btn != null)
+            {
+                btn.UpdatePendingUI(0);
+            }
+        }
+        ClearWarning();
     }
 
     void SetupNobles()
@@ -322,6 +347,7 @@ public class GameController : MonoBehaviour
         ClearPendingCoins();
         UpdateTurnVisuals();
         ResetTimer();
+        PublishOnlineTurnState();
         ScheduleBotTurnIfNeeded();
     }
 
@@ -382,11 +408,14 @@ public class GameController : MonoBehaviour
     private bool IsLocalPlayersTurn()
     {
         if (players == null || players.Length == 0) return false;
-        if (players[0] == null || players[0].isBot) return false;
         if (playOrder == null || playOrder.Length == 0) return false;
         if (currentPlayerIndex < 0 || currentPlayerIndex >= playOrder.Length) return false;
 
-        return playOrder[currentPlayerIndex] == 0;
+        int localSeatIndex = GetLocalPlayerUiIndex();
+        if (localSeatIndex < 0 || localSeatIndex >= players.Length) return false;
+        if (players[localSeatIndex] == null || players[localSeatIndex].isBot) return false;
+
+        return playOrder[currentPlayerIndex] == localSeatIndex;
     }
 
     private bool BlockActionOutsideLocalTurn()
@@ -778,6 +807,7 @@ public class GameController : MonoBehaviour
 
         ResetTimer();
         UpdateTurnVisuals();
+        PublishOnlineTurnState();
         if (!startedQuizThisTurn) {
             ScheduleBotTurnIfNeeded();
         }
@@ -985,9 +1015,7 @@ public class GameController : MonoBehaviour
             return; 
         }
 
-        // ดึงชื่อของผู้เล่นจาก PlayerPrefs (ถ้าไม่มีให้ใช้ Player 1)
-        string humanName = PlayerPrefs.GetString("Username", "Player 1");
-        if (string.IsNullOrEmpty(humanName)) humanName = "Player 1";
+        string humanName = GetConfiguredLocalPlayerName();
 
         // อ่านค่าที่ผู้เล่นเลือกมาจากหน้า Main Menu (ค่าตั้งต้นคือ 0)
         int selectedCharIndex = PlayerPrefs.GetInt("SelectedCharacter", 0);
@@ -1006,11 +1034,13 @@ public class GameController : MonoBehaviour
             activePlayerCount = humanPlayerCount;
             playOrder = new int[] { 0, 1 };
             currentPlayerIndex = 0;
+            localPlayerSlotIndex = GetResolvedLocalPlayerSlotIndex();
             Debug.Log($"[GameController] Online PvP mode detected. Human player count={humanPlayerCount}, bots disabled.");
         }
         else
         {
             activePlayerCount = Mathf.Clamp(players.Length, 2, 4);
+            localPlayerSlotIndex = 0;
         }
 
         for (int i = 0; i < players.Length; i++) 
@@ -1030,15 +1060,16 @@ public class GameController : MonoBehaviour
                 string finalName = "Player " + (i + 1); // บังคับเป็น Player 1, 2, 3, 4 ไว้ก่อน
 
                 if (!players[i].isBot) {
-                    if (i == 0)
+                    bool isLocalHumanSeat = !isOnlineMatchMode || i == localPlayerSlotIndex;
+                    if (isLocalHumanSeat)
                     {
                         finalName = humanName;
                         if (players[i].characterPortrait != null) players[i].characterPortrait.sprite = p1Data.portraitSprite;
-                        Debug.Log($"[GameController] Local player setup as: {finalName} with character {p1Data.characterName}");
+                        Debug.Log($"[GameController] Local player setup in slot {i + 1} as: {finalName} with character {p1Data.characterName}");
                     }
                     else
                     {
-                        finalName = GetOnlinePlayerDisplayName(i - 1, i + 1);
+                        finalName = GetOnlinePlayerDisplayNameForSeat(i);
                         if (remainingChars.Count > 0) {
                             int r = Random.Range(0, remainingChars.Count);
                             CharacterData remoteData = remainingChars[r];
@@ -1074,38 +1105,77 @@ public class GameController : MonoBehaviour
             return;
         }
 
-        for (int remoteIndex = 0; remoteIndex < MaxRemoteHumanSlots; remoteIndex++)
+        for (int seatIndex = 0; seatIndex < activePlayerCount && seatIndex < players.Length; seatIndex++)
         {
-            int playerSlot = remoteIndex + 1;
-            if (playerSlot >= players.Length || players[playerSlot] == null || players[playerSlot].isBot)
+            if (players[seatIndex] == null || players[seatIndex].isBot)
             {
                 continue;
             }
 
-            string remoteName = FusionManager.Instance.GetRemotePlayerName(remoteIndex);
-            if (string.IsNullOrWhiteSpace(remoteName))
+            string playerName = FusionManager.Instance.GetPlayerNameBySeat(seatIndex);
+            if (string.IsNullOrWhiteSpace(playerName))
             {
                 continue;
             }
 
-            if (players[playerSlot].nameText != null)
+            if (players[seatIndex].nameText != null)
             {
-                players[playerSlot].nameText.text = remoteName;
+                players[seatIndex].nameText.text = playerName;
             }
 
-            Debug.Log($"[GameController] Updated remote player slot {playerSlot + 1} name to {remoteName}");
+            Debug.Log($"[GameController] Updated player slot {seatIndex + 1} name to {playerName}");
         }
     }
 
-    private string GetOnlinePlayerDisplayName(int remoteIndex, int slotNumber)
+    private string GetOnlinePlayerDisplayNameForSeat(int seatIndex)
     {
         if (FusionManager.Instance == null)
         {
-            return "Online Player " + slotNumber;
+            return "Online Player " + (seatIndex + 1);
         }
 
-        string remoteName = FusionManager.Instance.GetRemotePlayerName(remoteIndex);
-        return string.IsNullOrWhiteSpace(remoteName) ? "Online Player " + slotNumber : remoteName;
+        string remoteName = FusionManager.Instance.GetPlayerNameBySeat(seatIndex);
+        return string.IsNullOrWhiteSpace(remoteName) ? "Online Player " + (seatIndex + 1) : remoteName;
+    }
+
+    private int GetResolvedLocalPlayerSlotIndex()
+    {
+        if (!isOnlineMatchMode || FusionManager.Instance == null)
+        {
+            return 0;
+        }
+
+        return Mathf.Clamp(FusionManager.Instance.GetLocalPlayerSeatIndex(), 0, Mathf.Max(0, OnlineHumanPlayerCount - 1));
+    }
+
+    private int GetLocalPlayerUiIndex()
+    {
+        return isOnlineMatchMode ? GetResolvedLocalPlayerSlotIndex() : 0;
+    }
+
+    private string GetConfiguredLocalPlayerName()
+    {
+        if (SupabaseManager.Instance != null)
+        {
+            string realName = SupabaseManager.Instance.GetCurrentUsername();
+            if (!string.IsNullOrWhiteSpace(realName))
+            {
+                return realName;
+            }
+        }
+
+        string humanName = PlayerPrefs.GetString("Username", string.Empty);
+        return string.IsNullOrWhiteSpace(humanName) ? "Player 1" : humanName;
+    }
+
+    private void PublishOnlineTurnState()
+    {
+        if (!isOnlineMatchMode || FusionManager.Instance == null)
+        {
+            return;
+        }
+
+        FusionManager.Instance.SendTurnState(currentPlayerIndex, currentRound, totalTurnCount, currentTurnDisplay);
     }
 
     // [NEW] อัปเดตตัวเลขเทิร์นบน UI

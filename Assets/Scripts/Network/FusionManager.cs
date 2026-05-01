@@ -14,8 +14,11 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     public static FusionManager Instance { get; private set; }
     public event Action PlayerNamesUpdated;
     public event Action ActivePlayersChanged;
+    public event Action<int, int, int, int> TurnStateReceived;
 
     private const char PlayerNameSeparator = '|';
+    private const string PlayerNameMessageType = "NAME";
+    private const string TurnStateMessageType = "TURN";
     private NetworkRunner _runner;
     private NetworkSceneManagerDefault _sceneManager;
     private readonly Dictionary<int, string> _playerNames = new Dictionary<int, string>();
@@ -87,7 +90,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     {
         Debug.Log($"[Fusion] Player joined: {player}");
 
-        RegisterPlayerName(runner.LocalPlayer.PlayerId, GetLocalPlayerName());
+        RegisterPlayerName(runner.LocalPlayer.PlayerId, GetLocalPlayerName(runner.LocalPlayer.PlayerId));
 
         if (runner.IsServer && player != runner.LocalPlayer)
         {
@@ -172,24 +175,85 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
             return;
         }
 
+        string[] parts = payload.Split(PlayerNameSeparator);
+        if (parts.Length == 0)
+        {
+            return;
+        }
+
+        if (string.Equals(parts[0], PlayerNameMessageType, StringComparison.Ordinal))
+        {
+            if (parts.Length < 3 || !int.TryParse(parts[1], out int playerId))
+            {
+                return;
+            }
+
+            string playerName = string.Join(PlayerNameSeparator.ToString(), parts.Skip(2));
+            RegisterPlayerName(playerId, playerName);
+
+            if (runner.IsServer)
+            {
+                BroadcastPlayerName(player, playerId, playerName);
+            }
+
+            return;
+        }
+
+        if (string.Equals(parts[0], TurnStateMessageType, StringComparison.Ordinal))
+        {
+            if (parts.Length < 5)
+            {
+                return;
+            }
+
+            if (!int.TryParse(parts[1], out int currentPlayerIndex) ||
+                !int.TryParse(parts[2], out int currentRound) ||
+                !int.TryParse(parts[3], out int totalTurnCount) ||
+                !int.TryParse(parts[4], out int currentTurnDisplay))
+            {
+                return;
+            }
+
+            if (runner.IsServer)
+            {
+                TurnStateReceived?.Invoke(currentPlayerIndex, currentRound, totalTurnCount, currentTurnDisplay);
+
+                foreach (var activePlayer in runner.ActivePlayers)
+                {
+                    if (activePlayer == player || activePlayer == runner.LocalPlayer)
+                    {
+                        continue;
+                    }
+
+                    runner.SendReliableDataToPlayer(activePlayer, default, data.ToArray());
+                }
+            }
+            else
+            {
+                TurnStateReceived?.Invoke(currentPlayerIndex, currentRound, totalTurnCount, currentTurnDisplay);
+            }
+
+            return;
+        }
+
         int separatorIndex = payload.IndexOf(PlayerNameSeparator);
         if (separatorIndex <= 0 || separatorIndex >= payload.Length - 1)
         {
             return;
         }
 
-        string playerIdText = payload.Substring(0, separatorIndex);
-        string playerName = payload.Substring(separatorIndex + 1);
-        if (!int.TryParse(playerIdText, out int playerId))
+        string legacyPlayerIdText = payload.Substring(0, separatorIndex);
+        string legacyPlayerName = payload.Substring(separatorIndex + 1);
+        if (!int.TryParse(legacyPlayerIdText, out int legacyPlayerId))
         {
             return;
         }
 
-        RegisterPlayerName(playerId, playerName);
+        RegisterPlayerName(legacyPlayerId, legacyPlayerName);
 
         if (runner.IsServer)
         {
-            BroadcastPlayerName(player, playerId, playerName);
+            BroadcastPlayerName(player, legacyPlayerId, legacyPlayerName);
         }
     }
     public void OnReliableDataProgress(NetworkRunner runner, PlayerRef player, ReliableKey key, float progress) { }
@@ -285,6 +349,62 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
             : null;
     }
 
+    public int GetLocalPlayerSeatIndex()
+    {
+        if (_runner == null)
+        {
+            return 0;
+        }
+
+        var orderedPlayers = GetOrderedActivePlayers();
+        for (int i = 0; i < orderedPlayers.Count; i++)
+        {
+            if (orderedPlayers[i] == _runner.LocalPlayer)
+            {
+                return i;
+            }
+        }
+
+        return 0;
+    }
+
+    public string GetPlayerNameBySeat(int seatIndex)
+    {
+        var orderedPlayers = GetOrderedActivePlayers();
+        if (seatIndex < 0 || seatIndex >= orderedPlayers.Count)
+        {
+            return null;
+        }
+
+        return GetDisplayNameForPlayer(orderedPlayers[seatIndex]);
+    }
+
+    public void SendTurnState(int currentPlayerIndex, int currentRound, int totalTurnCount, int currentTurnDisplay)
+    {
+        if (_runner == null)
+        {
+            return;
+        }
+
+        byte[] payload = EncodeTurnStatePayload(currentPlayerIndex, currentRound, totalTurnCount, currentTurnDisplay);
+        if (_runner.IsServer)
+        {
+            foreach (var activePlayer in _runner.ActivePlayers)
+            {
+                if (activePlayer == _runner.LocalPlayer)
+                {
+                    continue;
+                }
+
+                _runner.SendReliableDataToPlayer(activePlayer, default, payload);
+            }
+
+            return;
+        }
+
+        _runner.SendReliableDataToServer(default, payload);
+    }
+
     private void SendLocalPlayerNameToServer()
     {
         if (_runner == null)
@@ -292,7 +412,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
             return;
         }
 
-        string localName = GetLocalPlayerName();
+        string localName = GetLocalPlayerName(_runner.LocalPlayer.PlayerId);
         byte[] payload = EncodePlayerNamePayload(_runner.LocalPlayer.PlayerId, localName);
         _runner.SendReliableDataToServer(default, payload);
     }
@@ -353,11 +473,39 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
 
     private static byte[] EncodePlayerNamePayload(int playerId, string playerName)
     {
-        string safeName = string.IsNullOrWhiteSpace(playerName) ? "Player" : playerName.Trim();
-        return Encoding.UTF8.GetBytes($"{playerId}{PlayerNameSeparator}{safeName}");
+        string safeName = string.IsNullOrWhiteSpace(playerName) ? "Player " + playerId : playerName.Trim();
+        return Encoding.UTF8.GetBytes($"{PlayerNameMessageType}{PlayerNameSeparator}{playerId}{PlayerNameSeparator}{safeName}");
     }
 
-    private static string GetLocalPlayerName()
+    private static byte[] EncodeTurnStatePayload(int currentPlayerIndex, int currentRound, int totalTurnCount, int currentTurnDisplay)
+    {
+        return Encoding.UTF8.GetBytes(
+            $"{TurnStateMessageType}{PlayerNameSeparator}{currentPlayerIndex}{PlayerNameSeparator}{currentRound}{PlayerNameSeparator}{totalTurnCount}{PlayerNameSeparator}{currentTurnDisplay}");
+    }
+
+    private List<PlayerRef> GetOrderedActivePlayers()
+    {
+        if (_runner == null)
+        {
+            return new List<PlayerRef>();
+        }
+
+        return _runner.ActivePlayers
+            .OrderBy(p => p.PlayerId)
+            .ToList();
+    }
+
+    private string GetDisplayNameForPlayer(PlayerRef player)
+    {
+        if (_playerNames.TryGetValue(player.PlayerId, out string playerName) && !string.IsNullOrWhiteSpace(playerName))
+        {
+            return playerName;
+        }
+
+        return "Player " + player.PlayerId;
+    }
+
+    private static string GetLocalPlayerName(int fallbackPlayerId)
     {
         if (SupabaseManager.Instance != null)
         {
@@ -368,7 +516,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
             }
         }
 
-        string savedName = PlayerPrefs.GetString("Username", "Player 1");
-        return string.IsNullOrWhiteSpace(savedName) ? "Player 1" : savedName;
+        string savedName = PlayerPrefs.GetString("Username", string.Empty);
+        return string.IsNullOrWhiteSpace(savedName) ? "Player " + fallbackPlayerId : savedName;
     }
 }
