@@ -16,25 +16,74 @@ create unique index if not exists uq_rooms_room_code
 create index if not exists idx_rooms_status_created_at
     on public.rooms (status, created_at);
 
-alter table public.rooms enable row level security;
-
-drop policy if exists "rooms_select_all" on public.rooms;
-drop policy if exists "rooms_insert_all" on public.rooms;
-drop policy if exists "rooms_update_all" on public.rooms;
-
 create table if not exists public.matchmaking_queue (
     id uuid primary key default gen_random_uuid(),
     player_id text not null,
     status text not null default 'waiting',
     room_code text null,
     room_id bigint null references public.rooms (id) on delete set null,
-    target_player_count integer not null default 2,
-    search_request_id text not null,
+    target_player_count integer null,
+    search_request_id text null,
     created_at timestamptz not null default timezone('utc', now()),
-    matched_at timestamptz null,
-    constraint matchmaking_queue_target_player_count_check
-        check (target_player_count in (2, 3, 4))
+    matched_at timestamptz null
 );
+
+alter table public.matchmaking_queue
+    add column if not exists room_id bigint null references public.rooms (id) on delete set null;
+
+alter table public.matchmaking_queue
+    add column if not exists target_player_count integer;
+
+alter table public.matchmaking_queue
+    add column if not exists search_request_id text;
+
+update public.matchmaking_queue mq
+set target_player_count = r.player_count
+from public.rooms r
+where mq.target_player_count is null
+  and mq.room_code is not null
+  and mq.room_code = r.room_code;
+
+update public.matchmaking_queue
+set target_player_count = case
+    when room_code ilike 'QUEUE-2' then 2
+    when room_code ilike 'QUEUE-3' then 3
+    when room_code ilike 'QUEUE-4' then 4
+    else 2
+end
+where target_player_count is null;
+
+update public.matchmaking_queue mq
+set room_id = r.id
+from public.rooms r
+where mq.room_id is null
+  and mq.room_code is not null
+  and mq.room_code = r.room_code;
+
+update public.matchmaking_queue
+set search_request_id = gen_random_uuid()::text
+where search_request_id is null or btrim(search_request_id) = '';
+
+update public.matchmaking_queue
+set room_code = null
+where status = 'waiting'
+  and room_code ilike 'QUEUE-%';
+
+alter table public.matchmaking_queue
+    alter column target_player_count set default 2;
+
+alter table public.matchmaking_queue
+    alter column target_player_count set not null;
+
+alter table public.matchmaking_queue
+    drop constraint if exists matchmaking_queue_target_player_count_check;
+
+alter table public.matchmaking_queue
+    add constraint matchmaking_queue_target_player_count_check
+    check (target_player_count in (2, 3, 4));
+
+alter table public.matchmaking_queue
+    alter column search_request_id set not null;
 
 create index if not exists idx_matchmaking_queue_status_target_created_at
     on public.matchmaking_queue (status, target_player_count, created_at);
@@ -46,8 +95,12 @@ create unique index if not exists uq_matchmaking_queue_waiting_player
     on public.matchmaking_queue (player_id)
     where status = 'waiting';
 
+alter table public.rooms enable row level security;
 alter table public.matchmaking_queue enable row level security;
 
+drop policy if exists "rooms_select_all" on public.rooms;
+drop policy if exists "rooms_insert_all" on public.rooms;
+drop policy if exists "rooms_update_all" on public.rooms;
 drop policy if exists "matchmaking_queue_select_all" on public.matchmaking_queue;
 drop policy if exists "matchmaking_queue_insert_all" on public.matchmaking_queue;
 drop policy if exists "matchmaking_queue_update_all" on public.matchmaking_queue;

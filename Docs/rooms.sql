@@ -13,3 +13,9 @@ create unique index if not exists uq_rooms_room_code
 
 create index if not exists idx_rooms_status_created_at
     on public.rooms (status, created_at);
+
+alter table public.rooms enable row level security;
+
+drop policy if exists "rooms_select_all" on public.rooms;
+drop policy if exists "rooms_insert_all" on public.rooms;
+drop policy if exists "rooms_update_all" on public.rooms;

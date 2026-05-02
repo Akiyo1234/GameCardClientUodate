@@ -21,6 +21,8 @@ public class SupabaseManager : MonoBehaviour
     private Supabase.Client supabaseClient;
     public Supabase.Client Client => supabaseClient;
     public bool IsInitialized { get; private set; }
+    public string SupabaseUrl => supabaseUrl;
+    public string SupabaseAnonKey => supabaseKey;
 
     private async void Awake()
     {
@@ -124,7 +126,8 @@ public class SupabaseManager : MonoBehaviour
         return "Player 1";
     }
 
-    // [NEW] ฟังก์ชันสำหรับสร้างห้องและบันทึกลงฐานข้อมูล
+    // [Legacy] Private room / manual flows may still use this helper, but Auto Match no longer
+    // relies on client-side inserts here. Server-side matchmaking now creates room metadata.
     public async Task<bool> CreateRoom(string roomCode, string sessionName, int playerCount = 1)
     {
         try

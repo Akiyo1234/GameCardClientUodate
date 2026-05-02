@@ -2,10 +2,6 @@
 using UnityEngine.SceneManagement;
 using TMPro;
 using UnityEngine.UI;
-#if UNITY_EDITOR
-using UnityEditor;
-using UnityEditor.SceneManagement;
-#endif
 
 public class ModeSelectUI : MonoBehaviour
 {
@@ -27,9 +23,6 @@ public class ModeSelectUI : MonoBehaviour
 
     [Header("---- Matchmaking ----")]
     public MatchmakingClient matchmakingClient;
-#if UNITY_EDITOR
-    private bool _editorAutoMatchPanelBuildQueued;
-#endif
 
     private void Start()
     {
@@ -49,18 +42,6 @@ public class ModeSelectUI : MonoBehaviour
         currentCharacterIndex = PlayerPrefs.GetInt("SelectedCharacter", 0);
         UpdateCharacterPreview();
     }
-
-#if UNITY_EDITOR
-    private void OnValidate()
-    {
-        if (Application.isPlaying)
-        {
-            return;
-        }
-
-        QueueEditorAutoMatchPanelBuild();
-    }
-#endif
 
     public void OnClickMainMenuPlay()
     {
@@ -189,39 +170,6 @@ public class ModeSelectUI : MonoBehaviour
         if (characterPreviewImage != null) characterPreviewImage.sprite = charData.portraitSprite;
         if (characterNameText != null) characterNameText.text = charData.characterName;
     }
-
-#if UNITY_EDITOR
-    private void QueueEditorAutoMatchPanelBuild()
-    {
-        if (_editorAutoMatchPanelBuildQueued || !gameObject.scene.IsValid())
-        {
-            return;
-        }
-
-        _editorAutoMatchPanelBuildQueued = true;
-        EditorApplication.delayCall += BuildAutoMatchPanelInEditor;
-    }
-
-    private void BuildAutoMatchPanelInEditor()
-    {
-        _editorAutoMatchPanelBuildQueued = false;
-
-        if (this == null || gameObject == null || Application.isPlaying || !gameObject.scene.IsValid())
-        {
-            return;
-        }
-
-        BuildAutoMatchPlayerCountPanelIfNeeded();
-        WireAutoMatchPlayerCountPanelButtons();
-
-        if (autoMatchPlayerCountPanel != null && autoMatchPlayerCountPanel.activeSelf)
-        {
-            autoMatchPlayerCountPanel.SetActive(false);
-        }
-
-        EditorSceneManager.MarkSceneDirty(gameObject.scene);
-    }
-#endif
 
     private void BuildAutoMatchPlayerCountPanelIfNeeded()
     {

@@ -17,6 +17,15 @@ public class MatchmakingQueueData : BaseModel
     [Column("room_code")]
     public string RoomCode { get; set; }
 
+    [Column("room_id")]
+    public long? RoomId { get; set; }
+
+    [Column("target_player_count")]
+    public int TargetPlayerCount { get; set; }
+
+    [Column("search_request_id")]
+    public string SearchRequestId { get; set; }
+
     [Column("created_at")]
     public DateTime CreatedAt { get; set; }
 
