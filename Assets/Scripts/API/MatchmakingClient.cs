@@ -8,6 +8,7 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 #if UNITY_EDITOR
+using UnityEditor;
 using UnityEditor.SceneManagement;
 #endif
 
@@ -42,6 +43,9 @@ public class MatchmakingClient : MonoBehaviour
     private bool _isConnectingToFusion;
     private int _targetPlayerCount = 2;
     private float _searchStartedAtRealtime;
+#if UNITY_EDITOR
+    private bool _editorSearchPanelBuildQueued;
+#endif
 
     public string CurrentRoomId => PlayerPrefs.GetString(RoomIdPrefsKey, string.Empty);
     public string CurrentRoomCode => PlayerPrefs.GetString(RoomCodePrefsKey, string.Empty);
@@ -68,19 +72,7 @@ public class MatchmakingClient : MonoBehaviour
             return;
         }
 
-        BuildSearchPanelIfNeeded();
-        ResolveSearchPanelReferences();
-        WireSearchPanelButtons();
-
-        if (searchPanel != null && searchPanel.activeSelf)
-        {
-            searchPanel.SetActive(false);
-        }
-
-        if (gameObject.scene.IsValid())
-        {
-            EditorSceneManager.MarkSceneDirty(gameObject.scene);
-        }
+        QueueEditorSearchPanelBuild();
     }
 #endif
 
@@ -809,6 +801,40 @@ public class MatchmakingClient : MonoBehaviour
         string countText = marker.Substring("QUEUE-".Length);
         return int.TryParse(countText, out int parsedCount) ? Mathf.Clamp(parsedCount, 2, 4) : 0;
     }
+
+#if UNITY_EDITOR
+    private void QueueEditorSearchPanelBuild()
+    {
+        if (_editorSearchPanelBuildQueued || !gameObject.scene.IsValid())
+        {
+            return;
+        }
+
+        _editorSearchPanelBuildQueued = true;
+        EditorApplication.delayCall += BuildSearchPanelInEditor;
+    }
+
+    private void BuildSearchPanelInEditor()
+    {
+        _editorSearchPanelBuildQueued = false;
+
+        if (this == null || gameObject == null || Application.isPlaying || !gameObject.scene.IsValid())
+        {
+            return;
+        }
+
+        BuildSearchPanelIfNeeded();
+        ResolveSearchPanelReferences();
+        WireSearchPanelButtons();
+
+        if (searchPanel != null && searchPanel.activeSelf)
+        {
+            searchPanel.SetActive(false);
+        }
+
+        EditorSceneManager.MarkSceneDirty(gameObject.scene);
+    }
+#endif
 
     private void ShowSearchPanel()
     {
