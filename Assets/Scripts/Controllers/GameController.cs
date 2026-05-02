@@ -5,8 +5,8 @@ using TMPro;
 
 public class GameController : MonoBehaviour
 {
-    private const int OnlineHumanPlayerCount = 2;
     private const string MatchmakingRoomCodePrefsKey = "MatchmakingRoomCode";
+    private const string MatchmakingTargetPlayerCountPrefsKey = "MatchmakingTargetPlayerCount";
 
     [Header("---- Board & Prefabs ----")]
     public Transform tier3Container; 
@@ -94,7 +94,7 @@ public class GameController : MonoBehaviour
     void Awake()
     {
         isOnlineMatchMode = IsMatchedOnlineSession();
-        activePlayerCount = isOnlineMatchMode ? OnlineHumanPlayerCount : 4;
+        activePlayerCount = isOnlineMatchMode ? GetConfiguredOnlinePlayerCount() : 4;
 
         if (FusionManager.Instance != null)
         {
@@ -225,13 +225,13 @@ public class GameController : MonoBehaviour
 
     private bool ShouldWaitForOnlineOpponent()
     {
-        return isOnlineMatchMode && FusionManager.Instance != null && FusionManager.Instance.ActivePlayerCount < OnlineHumanPlayerCount;
+        return isOnlineMatchMode && FusionManager.Instance != null && FusionManager.Instance.ActivePlayerCount < GetConfiguredOnlinePlayerCount();
     }
 
     private void HandleFusionActivePlayersChanged()
     {
         isOnlineMatchMode = IsMatchedOnlineSession();
-        activePlayerCount = isOnlineMatchMode ? OnlineHumanPlayerCount : 4;
+        activePlayerCount = isOnlineMatchMode ? GetConfiguredOnlinePlayerCount() : 4;
 
         if (!isOnlineMatchMode)
         {
@@ -1034,7 +1034,7 @@ public class GameController : MonoBehaviour
     {
         if (isOnlineMatchMode)
         {
-            return OnlineHumanPlayerCount;
+            return GetConfiguredOnlinePlayerCount();
         }
 
         if (players == null || players.Length == 0) return 4;
@@ -1096,9 +1096,9 @@ public class GameController : MonoBehaviour
         int humanPlayerCount = 1;
         if (isOnlineMatchMode)
         {
-            humanPlayerCount = Mathf.Min(OnlineHumanPlayerCount, players.Length);
+            humanPlayerCount = Mathf.Min(GetConfiguredOnlinePlayerCount(), players.Length);
             activePlayerCount = humanPlayerCount;
-            playOrder = new int[] { 0, 1 };
+            playOrder = System.Linq.Enumerable.Range(0, humanPlayerCount).ToArray();
             currentPlayerIndex = 0;
             localPlayerSlotIndex = GetResolvedLocalPlayerSlotIndex();
             Debug.Log($"[GameController] Online PvP mode detected. Human player count={humanPlayerCount}, bots disabled.");
@@ -1213,7 +1213,7 @@ public class GameController : MonoBehaviour
             return 0;
         }
 
-        return Mathf.Clamp(FusionManager.Instance.GetLocalPlayerSeatIndex(), 0, Mathf.Max(0, OnlineHumanPlayerCount - 1));
+        return Mathf.Clamp(FusionManager.Instance.GetLocalPlayerSeatIndex(), 0, Mathf.Max(0, GetConfiguredOnlinePlayerCount() - 1));
     }
 
     private int GetLocalPlayerUiIndex()
@@ -1332,7 +1332,7 @@ public class GameController : MonoBehaviour
 
     private void ConfigureOnlinePlayerPanelLayout()
     {
-        if (!isOnlineMatchMode || players == null || players.Length < 2 || players[0] == null || players[1] == null)
+        if (!isOnlineMatchMode || GetConfiguredOnlinePlayerCount() != 2 || players == null || players.Length < 2 || players[0] == null || players[1] == null)
         {
             return;
         }
@@ -1390,6 +1390,11 @@ public class GameController : MonoBehaviour
         rectTransform.localScale = layout.LocalScale;
         rectTransform.localRotation = layout.LocalRotation;
         rectTransform.SetSiblingIndex(layout.SiblingIndex);
+    }
+
+    private int GetConfiguredOnlinePlayerCount()
+    {
+        return Mathf.Clamp(PlayerPrefs.GetInt(MatchmakingTargetPlayerCountPrefsKey, 2), 2, Mathf.Min(4, players != null && players.Length > 0 ? players.Length : 4));
     }
 
     // [NEW] อัปเดตตัวเลขเทิร์นบน UI

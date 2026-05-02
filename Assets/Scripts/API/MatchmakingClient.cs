@@ -16,6 +16,7 @@ public class MatchmakingClient : MonoBehaviour
     private const string PlayerIdPrefsKey = "MatchmakingPlayerId";
     private const string RoomIdPrefsKey = "MatchmakingRoomId";
     private const string RoomCodePrefsKey = "MatchmakingRoomCode";
+    private const string TargetPlayerCountPrefsKey = "MatchmakingTargetPlayerCount";
 
     [Header("Scene")]
     [SerializeField] private string gameSceneName = "SampleScene";
@@ -31,6 +32,7 @@ public class MatchmakingClient : MonoBehaviour
     private string _currentPlayerId;
     private string _currentQueueEntryId;
     private bool _isConnectingToFusion;
+    private int _targetPlayerCount = 2;
 
     public string CurrentRoomId => PlayerPrefs.GetString(RoomIdPrefsKey, string.Empty);
     public string CurrentRoomCode => PlayerPrefs.GetString(RoomCodePrefsKey, string.Empty);
@@ -38,19 +40,28 @@ public class MatchmakingClient : MonoBehaviour
     private void Awake()
     {
         _currentPlayerId = GetOrCreatePlayerId();
+        _targetPlayerCount = GetSavedTargetPlayerCount();
     }
 
     // Hook your "Find Match" UI button to this method in the Unity Inspector.
     public void FindMatch()
     {
+        FindMatch(GetSavedTargetPlayerCount());
+    }
+
+    public void FindMatch(int targetPlayerCount)
+    {
         _currentPlayerId = GetOrCreatePlayerId();
         _currentQueueEntryId = null;
         _isConnectingToFusion = false;
+        _targetPlayerCount = Mathf.Clamp(targetPlayerCount, 2, 4);
+        PlayerPrefs.SetInt(TargetPlayerCountPrefsKey, _targetPlayerCount);
+        PlayerPrefs.Save();
         ClearSavedMatch();
         StopPolling();
 
-        Debug.Log($"[Matchmaking] FindMatch pressed. PlayerId={_currentPlayerId}");
-        SetStatus("Searching...");
+        Debug.Log($"[Matchmaking] FindMatch pressed. PlayerId={_currentPlayerId}, TargetPlayers={_targetPlayerCount}");
+        SetStatus($"Searching {_targetPlayerCount} players...");
         StartCoroutine(JoinMatchmakingCoroutine());
     }
 
@@ -180,8 +191,9 @@ public class MatchmakingClient : MonoBehaviour
         }
 
         await ExpireStaleWaitingEntriesAsync(client);
+        await CancelMismatchedWaitingEntriesAsync(client, _targetPlayerCount);
 
-        var existingWaitingEntry = await GetLatestWaitingQueueEntryAsync(client);
+        var existingWaitingEntry = await GetLatestWaitingQueueEntryAsync(client, _targetPlayerCount);
         if (existingWaitingEntry != null)
         {
             RememberCurrentQueueEntry(existingWaitingEntry);
@@ -193,6 +205,7 @@ public class MatchmakingClient : MonoBehaviour
         {
             PlayerId = _currentPlayerId,
             Status = WaitingStatus,
+            RoomCode = BuildWaitingRoomMarker(_targetPlayerCount),
             CreatedAt = DateTime.UtcNow
         };
 
@@ -209,7 +222,7 @@ public class MatchmakingClient : MonoBehaviour
             Debug.LogWarning($"[Matchmaking] Insert waiting row warning: {ex.Message}");
             if (LooksLikeDuplicateQueueError(ex))
             {
-                var duplicateWaitingEntry = await GetLatestWaitingQueueEntryAsync(client);
+                var duplicateWaitingEntry = await GetLatestWaitingQueueEntryAsync(client, _targetPlayerCount);
                 if (duplicateWaitingEntry != null)
                 {
                     RememberCurrentQueueEntry(duplicateWaitingEntry);
@@ -277,7 +290,7 @@ public class MatchmakingClient : MonoBehaviour
             return null;
         }
 
-        var waitingEntry = await GetCurrentSearchEntryAsync(client) ?? await GetLatestWaitingQueueEntryAsync(client);
+        var waitingEntry = await GetCurrentSearchEntryAsync(client) ?? await GetLatestWaitingQueueEntryAsync(client, _targetPlayerCount);
         if (waitingEntry == null)
         {
             Debug.LogWarning($"[Matchmaking] No waiting entry available for PlayerId={_currentPlayerId}");
@@ -297,50 +310,61 @@ public class MatchmakingClient : MonoBehaviour
 
         await ExpireStaleWaitingEntriesAsync(client);
 
-        var waitingEntries = await GetTopWaitingEntriesAsync(client);
-        if (waitingEntries.Count < 2)
+        int targetPlayerCount = GetDesiredPlayerCountForEntry(currentEntry);
+        var waitingEntries = await GetTopWaitingEntriesAsync(client, targetPlayerCount);
+        if (waitingEntries.Count < targetPlayerCount)
         {
             Debug.Log($"[Matchmaking] Waiting for more players. Current waiting count={waitingEntries.Count}");
-            return await GetLatestWaitingQueueEntryAsync(client) ?? await GetLatestQueueEntryAsync(client);
+            return await GetLatestWaitingQueueEntryAsync(client, targetPlayerCount) ?? await GetLatestQueueEntryAsync(client);
         }
 
-        var firstEntry = waitingEntries[0];
-        var secondEntry = waitingEntries[1];
+        var selectedEntries = waitingEntries.Take(targetPlayerCount).ToList();
+        var firstEntry = selectedEntries[0];
 
-        if (!IsWaitingEntry(firstEntry) || !IsWaitingEntry(secondEntry))
+        if (selectedEntries.Any(entry => !IsWaitingEntry(entry)))
         {
-            Debug.LogWarning("[Matchmaking] Match creation skipped because one of the top queue rows is no longer waiting.");
-            return await GetLatestWaitingQueueEntryAsync(client) ?? await GetLatestQueueEntryAsync(client);
+            Debug.LogWarning("[Matchmaking] Match creation skipped because one of the selected queue rows is no longer waiting.");
+            return await GetLatestWaitingQueueEntryAsync(client, targetPlayerCount) ?? await GetLatestQueueEntryAsync(client);
         }
 
         if (!string.Equals(firstEntry.Id, currentEntry.Id, StringComparison.OrdinalIgnoreCase))
         {
             Debug.Log($"[Matchmaking] Another player is first in queue. CurrentEntry={currentEntry.Id}, FirstEntry={firstEntry.Id}");
-            return await GetLatestWaitingQueueEntryAsync(client) ?? await GetLatestQueueEntryAsync(client);
+            return await GetLatestWaitingQueueEntryAsync(client, targetPlayerCount) ?? await GetLatestQueueEntryAsync(client);
         }
 
-        if (string.Equals(firstEntry.PlayerId, secondEntry.PlayerId, StringComparison.OrdinalIgnoreCase))
+        if (selectedEntries
+            .Select(entry => entry.PlayerId)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count() < targetPlayerCount)
         {
-            Debug.LogWarning("[Matchmaking] Duplicate waiting player detected in top queue entries.");
-            return await GetLatestWaitingQueueEntryAsync(client) ?? await GetLatestQueueEntryAsync(client);
+            Debug.LogWarning("[Matchmaking] Duplicate waiting player detected in selected queue entries.");
+            return await GetLatestWaitingQueueEntryAsync(client, targetPlayerCount) ?? await GetLatestQueueEntryAsync(client);
         }
 
         string roomCode = GenerateRoomCode();
         DateTime matchedAt = DateTime.UtcNow;
 
-        firstEntry.Status = MatchedStatus;
-        firstEntry.RoomCode = roomCode;
-        firstEntry.MatchedAt = matchedAt;
-
-        secondEntry.Status = MatchedStatus;
-        secondEntry.RoomCode = roomCode;
-        secondEntry.MatchedAt = matchedAt;
+        foreach (var waitingEntry in selectedEntries)
+        {
+            waitingEntry.Status = MatchedStatus;
+            waitingEntry.RoomCode = roomCode;
+            waitingEntry.MatchedAt = matchedAt;
+        }
 
         try
         {
-            await client.From<MatchmakingQueueData>().Update(firstEntry);
-            await client.From<MatchmakingQueueData>().Update(secondEntry);
-            Debug.Log($"[Matchmaking] Match created. RoomCode={roomCode}, PlayerA={firstEntry.PlayerId}, PlayerB={secondEntry.PlayerId}");
+            foreach (var waitingEntry in selectedEntries)
+            {
+                await client.From<MatchmakingQueueData>().Update(waitingEntry);
+            }
+
+            if (SupabaseManager.Instance != null)
+            {
+                await SupabaseManager.Instance.CreateRoom(roomCode, gameSceneName, targetPlayerCount);
+            }
+
+            Debug.Log($"[Matchmaking] Match created. RoomCode={roomCode}, Players={string.Join(", ", selectedEntries.Select(entry => entry.PlayerId))}, TargetPlayers={targetPlayerCount}");
         }
         catch (Exception ex)
         {
@@ -348,16 +372,17 @@ public class MatchmakingClient : MonoBehaviour
             return await GetLatestQueueEntryAsync(client);
         }
 
-        return string.Equals(_currentPlayerId, firstEntry.PlayerId, StringComparison.OrdinalIgnoreCase)
-            ? firstEntry
-            : secondEntry;
+        return selectedEntries.FirstOrDefault(entry => string.Equals(_currentPlayerId, entry.PlayerId, StringComparison.OrdinalIgnoreCase))
+            ?? firstEntry;
     }
 
-    private async Task<List<MatchmakingQueueData>> GetTopWaitingEntriesAsync(Supabase.Client client)
+    private async Task<List<MatchmakingQueueData>> GetTopWaitingEntriesAsync(Supabase.Client client, int targetPlayerCount)
     {
+        string waitingMarker = BuildWaitingRoomMarker(targetPlayerCount);
         var waitingResponse = await client
             .From<MatchmakingQueueData>()
             .Where(x => x.Status == WaitingStatus)
+            .Where(x => x.RoomCode == waitingMarker)
             .Order(x => x.CreatedAt, Postgrest.Constants.Ordering.Ascending)
             .Limit(10)
             .Get();
@@ -371,7 +396,7 @@ public class MatchmakingClient : MonoBehaviour
                 .First())
             .OrderBy(x => x.CreatedAt)
             .ThenBy(x => x.Id, StringComparer.OrdinalIgnoreCase)
-            .Take(2)
+            .Take(targetPlayerCount)
             .ToList();
     }
 
@@ -391,7 +416,7 @@ public class MatchmakingClient : MonoBehaviour
     {
         if (string.IsNullOrWhiteSpace(_currentQueueEntryId))
         {
-            return await GetLatestWaitingQueueEntryAsync(client);
+            return await GetLatestWaitingQueueEntryAsync(client, _targetPlayerCount);
         }
 
         var entry = await GetQueueEntryByIdAsync(client, _currentQueueEntryId);
@@ -399,7 +424,7 @@ public class MatchmakingClient : MonoBehaviour
         {
             Debug.LogWarning($"[Matchmaking] Current queue row not found anymore. QueueId={_currentQueueEntryId}");
             _currentQueueEntryId = null;
-            return await GetLatestWaitingQueueEntryAsync(client);
+            return await GetLatestWaitingQueueEntryAsync(client, _targetPlayerCount);
         }
 
         return entry;
@@ -421,12 +446,14 @@ public class MatchmakingClient : MonoBehaviour
         return response.Models.FirstOrDefault();
     }
 
-    private async Task<MatchmakingQueueData> GetLatestWaitingQueueEntryAsync(Supabase.Client client)
+    private async Task<MatchmakingQueueData> GetLatestWaitingQueueEntryAsync(Supabase.Client client, int targetPlayerCount)
     {
+        string waitingMarker = BuildWaitingRoomMarker(targetPlayerCount);
         var response = await client
             .From<MatchmakingQueueData>()
             .Where(x => x.PlayerId == _currentPlayerId)
             .Where(x => x.Status == WaitingStatus)
+            .Where(x => x.RoomCode == waitingMarker)
             .Order(x => x.CreatedAt, Postgrest.Constants.Ordering.Descending)
             .Limit(1)
             .Get();
@@ -458,7 +485,7 @@ public class MatchmakingClient : MonoBehaviour
         Debug.Log($"[Matchmaking] Status: {entry.Status}");
         if (IsWaitingEntry(entry))
         {
-            SetStatus("Searching...");
+            SetStatus($"Searching {GetDesiredPlayerCountForEntry(entry)} players...");
             return;
         }
 
@@ -682,5 +709,50 @@ public class MatchmakingClient : MonoBehaviour
         return message.Contains("23505", StringComparison.OrdinalIgnoreCase) ||
                message.Contains("duplicate", StringComparison.OrdinalIgnoreCase) ||
                message.Contains("unique", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task CancelMismatchedWaitingEntriesAsync(Supabase.Client client, int targetPlayerCount)
+    {
+        string targetMarker = BuildWaitingRoomMarker(targetPlayerCount);
+        var waitingEntries = await GetWaitingEntriesForCurrentPlayerAsync(client);
+        foreach (var waitingEntry in waitingEntries)
+        {
+            if (string.Equals(waitingEntry.RoomCode, targetMarker, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            waitingEntry.Status = CancelledStatus;
+            waitingEntry.RoomCode = null;
+            waitingEntry.MatchedAt = null;
+            await client.From<MatchmakingQueueData>().Update(waitingEntry);
+        }
+    }
+
+    private int GetSavedTargetPlayerCount()
+    {
+        return Mathf.Clamp(PlayerPrefs.GetInt(TargetPlayerCountPrefsKey, 2), 2, 4);
+    }
+
+    private int GetDesiredPlayerCountForEntry(MatchmakingQueueData entry)
+    {
+        int parsedTargetCount = ParseTargetPlayerCountFromWaitingMarker(entry?.RoomCode);
+        return parsedTargetCount > 0 ? parsedTargetCount : GetSavedTargetPlayerCount();
+    }
+
+    private static string BuildWaitingRoomMarker(int targetPlayerCount)
+    {
+        return $"QUEUE-{Mathf.Clamp(targetPlayerCount, 2, 4)}";
+    }
+
+    private static int ParseTargetPlayerCountFromWaitingMarker(string marker)
+    {
+        if (string.IsNullOrWhiteSpace(marker) || !marker.StartsWith("QUEUE-", StringComparison.OrdinalIgnoreCase))
+        {
+            return 0;
+        }
+
+        string countText = marker.Substring("QUEUE-".Length);
+        return int.TryParse(countText, out int parsedCount) ? Mathf.Clamp(parsedCount, 2, 4) : 0;
     }
 }

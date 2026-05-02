@@ -125,7 +125,7 @@ public class SupabaseManager : MonoBehaviour
     }
 
     // [NEW] ฟังก์ชันสำหรับสร้างห้องและบันทึกลงฐานข้อมูล
-    public async Task<bool> CreateRoom(string roomCode, string sessionName)
+    public async Task<bool> CreateRoom(string roomCode, string sessionName, int playerCount = 1)
     {
         try
         {
@@ -136,7 +136,7 @@ public class SupabaseManager : MonoBehaviour
                 RoomCode = roomCode,
                 SessionName = sessionName,
                 HostName = GetCurrentUsername(),
-                PlayerCount = 1,
+                PlayerCount = Mathf.Clamp(playerCount, 1, 4),
                 Status = "waiting",
                 CreatedAt = DateTime.UtcNow
             };
