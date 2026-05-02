@@ -14,6 +14,7 @@ public class PlayerUI : MonoBehaviour
     [Header("Resources & Score")]
     public int currentScore = 0; 
     public int[] coins = new int[6]; 
+    public int quizBlackCoins = 0;
     public TextMeshProUGUI[] coinTexts; 
 
     [Header("Card Bonuses")]
@@ -32,6 +33,7 @@ public class PlayerUI : MonoBehaviour
         if (nameText != null) nameText.text = newName;
         currentScore = 0;
         System.Array.Clear(coins, 0, 6);
+        quizBlackCoins = 0;
         System.Array.Clear(bonuses, 0, 5);
         reservedCards.Clear();
         if (reservedAreaTransform != null) {
@@ -55,6 +57,36 @@ public class PlayerUI : MonoBehaviour
     public void ReceiveCoins(int[] pickedCoins) {
         for (int i = 0; i < 6; i++) coins[i] += pickedCoins[i];
         UpdateUI();
+    }
+
+    public void AddQuizBlackCoin(int amount = 1)
+    {
+        if (amount <= 0)
+        {
+            return;
+        }
+
+        quizBlackCoins += amount;
+        coins[5] += amount;
+        UpdateUI();
+    }
+
+    public int SpendWildcardCoins(int amount)
+    {
+        if (amount <= 0)
+        {
+            return 0;
+        }
+
+        int availableWildcardCoins = Mathf.Max(0, coins[5]);
+        int amountToSpend = Mathf.Min(amount, availableWildcardCoins);
+        int blackCoinsSpent = Mathf.Min(amountToSpend, quizBlackCoins);
+        int goldCoinsSpent = amountToSpend - blackCoinsSpent;
+
+        quizBlackCoins -= blackCoinsSpent;
+        coins[5] -= amountToSpend;
+
+        return goldCoinsSpent;
     }
 
     public void UpdateUI() {

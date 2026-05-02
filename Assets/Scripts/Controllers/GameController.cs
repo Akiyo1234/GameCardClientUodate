@@ -502,6 +502,16 @@ public class GameController : MonoBehaviour
         return total;
     }
 
+    int SpendWildcardCoinsWithoutReturningQuizBlack(PlayerUI player, int amount)
+    {
+        if (player == null || amount <= 0)
+        {
+            return 0;
+        }
+
+        return player.SpendWildcardCoins(amount);
+    }
+
     public void OnResourceClicked(ResourceButton clickedBtn)
     {
         if (BlockActionDuringQuiz()) return;
@@ -604,8 +614,8 @@ public class GameController : MonoBehaviour
                     bankCoins[i] += p.coins[i]; 
                     p.coins[i] = 0; 
                     
-                    p.coins[5] -= diff; 
-                    bankCoins[5] += diff; 
+                    int goldCoinsReturned = SpendWildcardCoinsWithoutReturningQuizBlack(p, diff);
+                    bankCoins[5] += goldCoinsReturned; 
                 } else {
                     p.coins[i] -= actualCost; 
                     bankCoins[i] += actualCost; 
@@ -760,7 +770,8 @@ public class GameController : MonoBehaviour
                 if (p.coins[i] < actualCost) {
                     int diff = actualCost - p.coins[i];
                     bankCoins[i] += p.coins[i]; p.coins[i] = 0; 
-                    p.coins[5] -= diff; bankCoins[5] += diff; 
+                    int goldCoinsReturned = SpendWildcardCoinsWithoutReturningQuizBlack(p, diff);
+                    bankCoins[5] += goldCoinsReturned; 
                 } else {
                     p.coins[i] -= actualCost; bankCoins[i] += actualCost; 
                 }
@@ -1260,7 +1271,8 @@ public class GameController : MonoBehaviour
             {
                 Score = player != null ? player.currentScore : 0,
                 Coins = player != null ? (int[])player.coins.Clone() : new int[6],
-                Bonuses = player != null ? (int[])player.bonuses.Clone() : new int[5]
+                Bonuses = player != null ? (int[])player.bonuses.Clone() : new int[5],
+                QuizBlackCoins = player != null ? player.quizBlackCoins : 0
             };
         }
 
@@ -1288,6 +1300,7 @@ public class GameController : MonoBehaviour
                 }
 
                 player.currentScore = snapshot.Players[i].Score;
+                player.quizBlackCoins = Mathf.Max(0, snapshot.Players[i].QuizBlackCoins);
 
                 if (snapshot.Players[i].Coins != null)
                 {

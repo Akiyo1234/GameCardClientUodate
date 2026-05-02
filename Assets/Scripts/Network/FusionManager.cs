@@ -46,6 +46,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         public int Score;
         public int[] Coins;
         public int[] Bonuses;
+        public int QuizBlackCoins;
     }
 
     public struct EconomyStateSnapshot
@@ -827,7 +828,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         }
 
         return string.Join(";", players.Select(player =>
-            $"{player.Score}~{EncodeIntArray(player.Coins)}~{EncodeIntArray(player.Bonuses)}"));
+            $"{player.Score}~{EncodeIntArray(player.Coins)}~{EncodeIntArray(player.Bonuses)}~{player.QuizBlackCoins}"));
     }
 
     private static EconomyStateSnapshot DecodeEconomyState(string bankPayload, string playersPayload)
@@ -858,11 +859,18 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
                 continue;
             }
 
+            int quizBlackCoins = 0;
+            if (parts.Length >= 4)
+            {
+                int.TryParse(parts[3], out quizBlackCoins);
+            }
+
             players.Add(new EconomyPlayerSnapshot
             {
                 Score = score,
                 Coins = DecodeIntArray(parts[1]),
-                Bonuses = DecodeIntArray(parts[2])
+                Bonuses = DecodeIntArray(parts[2]),
+                QuizBlackCoins = quizBlackCoins
             });
         }
 

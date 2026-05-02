@@ -492,7 +492,7 @@ public class QuizManager : MonoBehaviour
         {
             if (gemIndex == 5)
             {
-                winnerUI.coins[5]++;
+                winnerUI.AddQuizBlackCoin();
 
                 const string blackCoinName = "เหรียญดำ";
                 if (receivedGems.ContainsKey(blackCoinName))
