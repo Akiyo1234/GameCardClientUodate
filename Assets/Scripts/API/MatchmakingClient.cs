@@ -6,6 +6,10 @@ using System.Threading.Tasks;
 using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.UI;
+#if UNITY_EDITOR
+using UnityEditor.SceneManagement;
+#endif
 
 public class MatchmakingClient : MonoBehaviour
 {
@@ -26,13 +30,18 @@ public class MatchmakingClient : MonoBehaviour
     [SerializeField] private float staleWaitingTimeoutSeconds = 300f;
 
     [Header("UI")]
+    [SerializeField] private GameObject searchPanel;
     [SerializeField] private TextMeshProUGUI statusText;
+    [SerializeField] private TextMeshProUGUI timerText;
+    [SerializeField] private Button cancelSearchButton;
 
     private Coroutine _pollCoroutine;
+    private Coroutine _searchTimerCoroutine;
     private string _currentPlayerId;
     private string _currentQueueEntryId;
     private bool _isConnectingToFusion;
     private int _targetPlayerCount = 2;
+    private float _searchStartedAtRealtime;
 
     public string CurrentRoomId => PlayerPrefs.GetString(RoomIdPrefsKey, string.Empty);
     public string CurrentRoomCode => PlayerPrefs.GetString(RoomCodePrefsKey, string.Empty);
@@ -41,7 +50,39 @@ public class MatchmakingClient : MonoBehaviour
     {
         _currentPlayerId = GetOrCreatePlayerId();
         _targetPlayerCount = GetSavedTargetPlayerCount();
+        BuildSearchPanelIfNeeded();
+        ResolveSearchPanelReferences();
+        WireSearchPanelButtons();
     }
+
+    private void Start()
+    {
+        HideSearchPanel(resetTimer: true);
+    }
+
+#if UNITY_EDITOR
+    private void OnValidate()
+    {
+        if (Application.isPlaying)
+        {
+            return;
+        }
+
+        BuildSearchPanelIfNeeded();
+        ResolveSearchPanelReferences();
+        WireSearchPanelButtons();
+
+        if (searchPanel != null && searchPanel.activeSelf)
+        {
+            searchPanel.SetActive(false);
+        }
+
+        if (gameObject.scene.IsValid())
+        {
+            EditorSceneManager.MarkSceneDirty(gameObject.scene);
+        }
+    }
+#endif
 
     // Hook your "Find Match" UI button to this method in the Unity Inspector.
     public void FindMatch()
@@ -59,6 +100,8 @@ public class MatchmakingClient : MonoBehaviour
         PlayerPrefs.Save();
         ClearSavedMatch();
         StopPolling();
+        ShowSearchPanel();
+        StartSearchTimer();
 
         Debug.Log($"[Matchmaking] FindMatch pressed. PlayerId={_currentPlayerId}, TargetPlayers={_targetPlayerCount}");
         SetStatus($"Searching {_targetPlayerCount} players...");
@@ -72,6 +115,8 @@ public class MatchmakingClient : MonoBehaviour
         StopPolling();
         _isConnectingToFusion = false;
         ClearSavedMatch();
+        StopSearchTimer(resetTimer: true);
+        HideSearchPanel(resetTimer: true);
 
         Debug.Log($"[Matchmaking] CancelMatchmaking pressed. PlayerId={_currentPlayerId}");
         SetStatus("Cancelled");
@@ -477,6 +522,7 @@ public class MatchmakingClient : MonoBehaviour
         if (entry == null)
         {
             Debug.LogWarning("[Matchmaking] Queue entry not found.");
+            StopSearchTimer();
             SetErrorStatus("Queue entry not found.");
             return;
         }
@@ -485,12 +531,14 @@ public class MatchmakingClient : MonoBehaviour
         Debug.Log($"[Matchmaking] Status: {entry.Status}");
         if (IsWaitingEntry(entry))
         {
+            ShowSearchPanel();
             SetStatus($"Searching {GetDesiredPlayerCountForEntry(entry)} players...");
             return;
         }
 
         if (string.Equals(entry.Status, CancelledStatus, StringComparison.OrdinalIgnoreCase))
         {
+            HideSearchPanel(resetTimer: true);
             SetStatus("Cancelled");
             return;
         }
@@ -507,6 +555,8 @@ public class MatchmakingClient : MonoBehaviour
         }
 
         _isConnectingToFusion = true;
+        StopSearchTimer();
+        SetCancelButtonInteractable(false);
         PlayerPrefs.SetString(RoomIdPrefsKey, entry.Id ?? string.Empty);
         PlayerPrefs.SetString(RoomCodePrefsKey, entry.RoomCode);
         PlayerPrefs.Save();
@@ -663,6 +713,10 @@ public class MatchmakingClient : MonoBehaviour
 
     private void SetErrorStatus(string errorMessage)
     {
+        ShowSearchPanel();
+        StopSearchTimer();
+        SetCancelButtonInteractable(true);
+
         if (string.IsNullOrWhiteSpace(errorMessage))
         {
             SetStatus("Error");
@@ -754,5 +808,246 @@ public class MatchmakingClient : MonoBehaviour
 
         string countText = marker.Substring("QUEUE-".Length);
         return int.TryParse(countText, out int parsedCount) ? Mathf.Clamp(parsedCount, 2, 4) : 0;
+    }
+
+    private void ShowSearchPanel()
+    {
+        BuildSearchPanelIfNeeded();
+        ResolveSearchPanelReferences();
+        WireSearchPanelButtons();
+        SetCancelButtonInteractable(true);
+
+        if (searchPanel != null)
+        {
+            searchPanel.SetActive(true);
+        }
+    }
+
+    private void HideSearchPanel(bool resetTimer)
+    {
+        if (searchPanel != null)
+        {
+            searchPanel.SetActive(false);
+        }
+
+        StopSearchTimer(resetTimer);
+        SetCancelButtonInteractable(true);
+    }
+
+    private void StartSearchTimer()
+    {
+        _searchStartedAtRealtime = Time.realtimeSinceStartup;
+        StopSearchTimer(resetTimer: true);
+        UpdateTimerText(0f);
+        _searchTimerCoroutine = StartCoroutine(UpdateSearchTimerCoroutine());
+    }
+
+    private void StopSearchTimer(bool resetTimer = false)
+    {
+        if (_searchTimerCoroutine != null)
+        {
+            StopCoroutine(_searchTimerCoroutine);
+            _searchTimerCoroutine = null;
+        }
+
+        if (resetTimer)
+        {
+            UpdateTimerText(0f);
+        }
+    }
+
+    private IEnumerator UpdateSearchTimerCoroutine()
+    {
+        while (true)
+        {
+            UpdateTimerText(Time.realtimeSinceStartup - _searchStartedAtRealtime);
+            yield return new WaitForSecondsRealtime(0.2f);
+        }
+    }
+
+    private void UpdateTimerText(float elapsedSeconds)
+    {
+        if (timerText == null)
+        {
+            return;
+        }
+
+        int totalSeconds = Mathf.Max(0, Mathf.FloorToInt(elapsedSeconds));
+        int minutes = totalSeconds / 60;
+        int seconds = totalSeconds % 60;
+        timerText.text = $"{minutes:00}:{seconds:00}";
+    }
+
+    private void SetCancelButtonInteractable(bool interactable)
+    {
+        if (cancelSearchButton != null)
+        {
+            cancelSearchButton.interactable = interactable;
+        }
+    }
+
+    private void ResolveSearchPanelReferences()
+    {
+        if (searchPanel == null)
+        {
+            Transform existingPanelTransform = transform.Find("MatchmakingSearchPanel");
+            if (existingPanelTransform != null)
+            {
+                searchPanel = existingPanelTransform.gameObject;
+            }
+        }
+
+        if (searchPanel == null)
+        {
+            return;
+        }
+
+        if (statusText == null)
+        {
+            Transform statusTransform = searchPanel.transform.Find("StatusText");
+            if (statusTransform != null)
+            {
+                statusText = statusTransform.GetComponent<TextMeshProUGUI>();
+            }
+        }
+
+        if (timerText == null)
+        {
+            Transform timerTransform = searchPanel.transform.Find("TimerText");
+            if (timerTransform != null)
+            {
+                timerText = timerTransform.GetComponent<TextMeshProUGUI>();
+            }
+        }
+
+        if (cancelSearchButton == null)
+        {
+            Transform cancelTransform = searchPanel.transform.Find("CancelSearchButton");
+            if (cancelTransform != null)
+            {
+                cancelSearchButton = cancelTransform.GetComponent<Button>();
+            }
+        }
+    }
+
+    private void WireSearchPanelButtons()
+    {
+        if (cancelSearchButton == null)
+        {
+            return;
+        }
+
+        cancelSearchButton.onClick.RemoveAllListeners();
+        cancelSearchButton.onClick.AddListener(CancelMatchmaking);
+    }
+
+    private void BuildSearchPanelIfNeeded()
+    {
+        ResolveSearchPanelReferences();
+        if (searchPanel != null)
+        {
+            return;
+        }
+
+        searchPanel = new GameObject("MatchmakingSearchPanel", typeof(RectTransform), typeof(Image));
+        searchPanel.transform.SetParent(transform, false);
+
+        RectTransform panelRect = searchPanel.GetComponent<RectTransform>();
+        panelRect.anchorMin = new Vector2(0.5f, 0.5f);
+        panelRect.anchorMax = new Vector2(0.5f, 0.5f);
+        panelRect.pivot = new Vector2(0.5f, 0.5f);
+        panelRect.anchoredPosition = new Vector2(0f, -24f);
+        panelRect.sizeDelta = new Vector2(430f, 210f);
+
+        Image panelImage = searchPanel.GetComponent<Image>();
+        panelImage.color = new Color(0.06f, 0.11f, 0.16f, 0.96f);
+        panelImage.raycastTarget = true;
+
+        TMP_FontAsset sharedFont = FindSharedFont();
+        CreatePanelText("SearchTitleText", "Finding Match", new Vector2(0f, 64f), new Vector2(280f, 34f), 28f, Color.white, sharedFont, FontStyles.Bold);
+        statusText = CreatePanelText("StatusText", "Searching...", new Vector2(0f, 16f), new Vector2(320f, 34f), 22f, new Color(0.92f, 0.96f, 0.98f, 1f), sharedFont, FontStyles.Normal);
+        timerText = CreatePanelText("TimerText", "00:00", new Vector2(0f, -36f), new Vector2(220f, 40f), 30f, new Color(1f, 0.9f, 0.58f, 1f), sharedFont, FontStyles.Bold);
+        cancelSearchButton = CreateIconButton("CancelSearchButton", "X", new Vector2(176f, 76f), new Vector2(42f, 42f), sharedFont);
+        CreatePanelText("CancelHintText", "Tap X to stop searching", new Vector2(0f, -86f), new Vector2(260f, 28f), 18f, new Color(0.78f, 0.84f, 0.89f, 1f), sharedFont, FontStyles.Italic);
+    }
+
+    private TMP_FontAsset FindSharedFont()
+    {
+        if (statusText != null && statusText.font != null)
+        {
+            return statusText.font;
+        }
+
+        TextMeshProUGUI existingText = GetComponentInChildren<TextMeshProUGUI>(true);
+        if (existingText != null && existingText.font != null)
+        {
+            return existingText.font;
+        }
+
+        return TMP_Settings.defaultFontAsset;
+    }
+
+    private TextMeshProUGUI CreatePanelText(string objectName, string text, Vector2 anchoredPosition, Vector2 size, float fontSize, Color color, TMP_FontAsset font, FontStyles fontStyle)
+    {
+        GameObject textObject = new GameObject(objectName, typeof(RectTransform), typeof(TextMeshProUGUI));
+        textObject.transform.SetParent(searchPanel.transform, false);
+
+        RectTransform textRect = textObject.GetComponent<RectTransform>();
+        textRect.anchorMin = new Vector2(0.5f, 0.5f);
+        textRect.anchorMax = new Vector2(0.5f, 0.5f);
+        textRect.pivot = new Vector2(0.5f, 0.5f);
+        textRect.anchoredPosition = anchoredPosition;
+        textRect.sizeDelta = size;
+
+        TextMeshProUGUI label = textObject.GetComponent<TextMeshProUGUI>();
+        label.text = text;
+        label.font = font;
+        label.fontSize = fontSize;
+        label.fontStyle = fontStyle;
+        label.color = color;
+        label.alignment = TextAlignmentOptions.Center;
+        return label;
+    }
+
+    private Button CreateIconButton(string objectName, string buttonLabel, Vector2 anchoredPosition, Vector2 size, TMP_FontAsset font)
+    {
+        GameObject buttonObject = new GameObject(objectName, typeof(RectTransform), typeof(Image), typeof(Button));
+        buttonObject.transform.SetParent(searchPanel.transform, false);
+
+        RectTransform buttonRect = buttonObject.GetComponent<RectTransform>();
+        buttonRect.anchorMin = new Vector2(0.5f, 0.5f);
+        buttonRect.anchorMax = new Vector2(0.5f, 0.5f);
+        buttonRect.pivot = new Vector2(0.5f, 0.5f);
+        buttonRect.anchoredPosition = anchoredPosition;
+        buttonRect.sizeDelta = size;
+
+        Image buttonImage = buttonObject.GetComponent<Image>();
+        buttonImage.color = new Color(0.79f, 0.24f, 0.2f, 1f);
+
+        Button button = buttonObject.GetComponent<Button>();
+        button.targetGraphic = buttonImage;
+
+        CreateButtonLabel(buttonObject.transform, buttonLabel, font);
+        return button;
+    }
+
+    private void CreateButtonLabel(Transform parent, string text, TMP_FontAsset font)
+    {
+        GameObject labelObject = new GameObject("Text (TMP)", typeof(RectTransform), typeof(TextMeshProUGUI));
+        labelObject.transform.SetParent(parent, false);
+
+        RectTransform labelRect = labelObject.GetComponent<RectTransform>();
+        labelRect.anchorMin = Vector2.zero;
+        labelRect.anchorMax = Vector2.one;
+        labelRect.offsetMin = Vector2.zero;
+        labelRect.offsetMax = Vector2.zero;
+
+        TextMeshProUGUI label = labelObject.GetComponent<TextMeshProUGUI>();
+        label.text = text;
+        label.font = font;
+        label.fontSize = 24f;
+        label.fontStyle = FontStyles.Bold;
+        label.color = Color.white;
+        label.alignment = TextAlignmentOptions.Center;
     }
 }

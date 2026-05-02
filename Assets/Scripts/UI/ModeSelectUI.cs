@@ -2,6 +2,9 @@
 using UnityEngine.SceneManagement;
 using TMPro;
 using UnityEngine.UI;
+#if UNITY_EDITOR
+using UnityEditor.SceneManagement;
+#endif
 
 public class ModeSelectUI : MonoBehaviour
 {
@@ -30,6 +33,7 @@ public class ModeSelectUI : MonoBehaviour
         if (modeSelectPanel != null) modeSelectPanel.SetActive(false);
         if (lobbyPanel != null) lobbyPanel.SetActive(false);
         BuildAutoMatchPlayerCountPanelIfNeeded();
+        WireAutoMatchPlayerCountPanelButtons();
         if (autoMatchPlayerCountPanel != null) autoMatchPlayerCountPanel.SetActive(false);
 
         int coins = PlayerPrefs.GetInt("TotalCoins", 0);
@@ -41,6 +45,29 @@ public class ModeSelectUI : MonoBehaviour
         currentCharacterIndex = PlayerPrefs.GetInt("SelectedCharacter", 0);
         UpdateCharacterPreview();
     }
+
+#if UNITY_EDITOR
+    private void OnValidate()
+    {
+        if (Application.isPlaying)
+        {
+            return;
+        }
+
+        BuildAutoMatchPlayerCountPanelIfNeeded();
+        WireAutoMatchPlayerCountPanelButtons();
+
+        if (autoMatchPlayerCountPanel != null && autoMatchPlayerCountPanel.activeSelf)
+        {
+            autoMatchPlayerCountPanel.SetActive(false);
+        }
+
+        if (gameObject.scene.IsValid())
+        {
+            EditorSceneManager.MarkSceneDirty(gameObject.scene);
+        }
+    }
+#endif
 
     public void OnClickMainMenuPlay()
     {
@@ -197,6 +224,37 @@ public class ModeSelectUI : MonoBehaviour
         CreatePlayerCountButton("3 Players", new Vector2(0f, -16f), () => OnClickAutoMatch3Players(), sharedFont);
         CreatePlayerCountButton("4 Players", new Vector2(0f, -84f), () => OnClickAutoMatch4Players(), sharedFont);
         CreateCloseButton(sharedFont);
+    }
+
+    private void WireAutoMatchPlayerCountPanelButtons()
+    {
+        if (autoMatchPlayerCountPanel == null)
+        {
+            return;
+        }
+
+        BindAutoMatchButton("2PlayersButton", OnClickAutoMatch2Players);
+        BindAutoMatchButton("3PlayersButton", OnClickAutoMatch3Players);
+        BindAutoMatchButton("4PlayersButton", OnClickAutoMatch4Players);
+        BindAutoMatchButton("AutoMatchCloseButton", OnClickCloseAutoMatchPlayerCountPanel);
+    }
+
+    private void BindAutoMatchButton(string objectName, UnityEngine.Events.UnityAction onClick)
+    {
+        Transform buttonTransform = autoMatchPlayerCountPanel.transform.Find(objectName);
+        if (buttonTransform == null)
+        {
+            return;
+        }
+
+        Button button = buttonTransform.GetComponent<Button>();
+        if (button == null)
+        {
+            return;
+        }
+
+        button.onClick.RemoveAllListeners();
+        button.onClick.AddListener(onClick);
     }
 
     private void CreatePlayerCountButton(string label, Vector2 anchoredPosition, UnityEngine.Events.UnityAction onClick, TMP_FontAsset font)

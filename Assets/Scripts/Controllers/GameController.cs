@@ -1098,7 +1098,11 @@ public class GameController : MonoBehaviour
         {
             humanPlayerCount = Mathf.Min(GetConfiguredOnlinePlayerCount(), players.Length);
             activePlayerCount = humanPlayerCount;
-            playOrder = System.Linq.Enumerable.Range(0, humanPlayerCount).ToArray();
+            playOrder = new int[humanPlayerCount];
+            for (int seatIndex = 0; seatIndex < humanPlayerCount; seatIndex++)
+            {
+                playOrder[seatIndex] = seatIndex;
+            }
             currentPlayerIndex = 0;
             localPlayerSlotIndex = GetResolvedLocalPlayerSlotIndex();
             Debug.Log($"[GameController] Online PvP mode detected. Human player count={humanPlayerCount}, bots disabled.");
