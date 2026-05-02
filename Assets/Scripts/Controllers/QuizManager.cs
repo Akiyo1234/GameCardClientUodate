@@ -320,7 +320,7 @@ public class QuizManager : MonoBehaviour
         }
 
         if (timerText != null) timerText.text = Mathf.CeilToInt(currentTime).ToString();
-        if (rewardText != null) rewardText.text = "รางวัลอันดับ 1: สุ่มไอเทม 3 ชิ้น";
+        if (rewardText != null) rewardText.text = "รางวัลอันดับ 1: เหรียญดำพิเศษ 1 เหรียญ";
         if (gameController != null) gameController.SetGameplayInputLocked(true);
         if (quizPanel != null) quizPanel.SetActive(true);
 
@@ -475,31 +475,7 @@ public class QuizManager : MonoBehaviour
             return new List<int>();
         }
 
-        int[] simulatedBank = (int[])gameController.bankCoins.Clone();
-        List<int> rewardGemIndices = new List<int>();
-
-        for (int i = 0; i < 3; i++)
-        {
-            List<int> availableGemIndices = new List<int>();
-            for (int gemIndex = 0; gemIndex < 5; gemIndex++)
-            {
-                if (simulatedBank[gemIndex] > 0)
-                {
-                    availableGemIndices.Add(gemIndex);
-                }
-            }
-
-            if (availableGemIndices.Count == 0)
-            {
-                break;
-            }
-
-            int selectedGemIndex = availableGemIndices[Random.Range(0, availableGemIndices.Count)];
-            simulatedBank[selectedGemIndex]--;
-            rewardGemIndices.Add(selectedGemIndex);
-        }
-
-        return rewardGemIndices;
+        return new List<int> { 5 };
     }
 
     private string ApplyRewardGemIndices(int playerIndex, List<int> rewardGemIndices)
@@ -514,6 +490,23 @@ public class QuizManager : MonoBehaviour
 
         foreach (int gemIndex in rewardGemIndices ?? new List<int>())
         {
+            if (gemIndex == 5)
+            {
+                winnerUI.coins[5]++;
+
+                const string blackCoinName = "เหรียญดำ";
+                if (receivedGems.ContainsKey(blackCoinName))
+                {
+                    receivedGems[blackCoinName]++;
+                }
+                else
+                {
+                    receivedGems[blackCoinName] = 1;
+                }
+
+                continue;
+            }
+
             if (gemIndex < 0 || gemIndex >= 5 || gameController.bankCoins[gemIndex] <= 0)
             {
                 continue;
@@ -632,6 +625,7 @@ public class QuizManager : MonoBehaviour
             case 2: return "Network";
             case 3: return "Storage";
             case 4: return "Security";
+            case 5: return "เหรียญดำ";
             default: return "Item";
         }
     }
