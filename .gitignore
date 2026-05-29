@@ -20,6 +20,12 @@ Build_Windows/
 **/*.dylib
 **/*.so
 
+# ข้อยกเว้น: native plugin ที่อยู่ใน Assets (เช่น Fusion NanoSockets libnanosockets.so)
+# จำเป็นต่อการ build Android/iOS — ต้องเก็บใน repo ไม่งั้น Fusion ต่อเน็ตบนมือถือไม่ได้
+!Assets/**/*.so
+!Assets/**/*.dylib
+!Assets/**/*.a
+
 # MemoryCaptures can get excessive in size.
 # They also could contain extremely sensitive data
 /[Mm]emoryCaptures/

@@ -77,6 +77,13 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     [Header("---- Scene Names ----")]
     public string gameSceneName = "SampleScene";
 
+    [Header("---- Photon ----")]
+    // บังคับ Photon region ให้ทุกแพลตฟอร์มต่อที่เดียวกัน (asia, jp, sg, us, ...) — เว้นว่าง = ใช้ best region ตาม ping
+    // จำเป็นมาก: ไม่งั้น PC กับมือถืออาจต่อคนละ region → host สร้างห้องที่นึง client หาอีกที่นึง → เข้าห้องไม่ได้
+    [SerializeField] private string fixedPhotonRegion = "asia";
+    // เปิด Photon log ละเอียด (region/operation) ลง logcat เพื่อดีบัก — เปิดเฉพาะตอนต้องไล่ปัญหา network
+    [SerializeField] private bool verbosePhotonLog = false;
+
     private void Awake()
     {
         if (Instance == null)
@@ -113,11 +120,12 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
 
     private IEnumerator StartMatchedGameCoroutine(string roomCode, string sceneName, Action<string> onFail, bool? isHost)
     {
-        const int maxRetries = 20;
+        const int maxRetries = 24;
         const float retryDelaySeconds = 2.5f;
-        // [FIX] Client รอนานกว่า Host เพื่อให้ Host มีเวลาสร้างห้องเสร็จก่อน
-        // Host สร้างห้อง Photon บนเครื่อง APK ใช้เวลา 5-15 วิ ก่อนที่ Client จะมุดเข้าได้
-        const float clientInitialDelaySeconds = 8f;
+        // [FIX] Client รอ Host มีเวลาสร้างห้องก่อน แต่ลดลงเหลือ 4 วิ เพราะ retry loop รับช่วงต่อได้อยู่แล้ว
+        // (รอ 4 วิ + 24 ครั้ง × 2.5 วิ ≈ งบเวลารวม ~64 วิ — ครอบคลุมการสร้างห้อง Photon บน emulator ที่อืด)
+        // ลองเข้าเร็วขึ้น = ถ้า Host สร้างห้องเสร็จไว ก็ต่อติดเร็ว ไม่ต้องรอครบ 8 วิทุกครั้ง
+        const float clientInitialDelaySeconds = 4f;
         string lastFailReason = "Unknown";
         
         GameMode targetMode = GameMode.AutoHostOrClient;
@@ -125,6 +133,12 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         {
             targetMode = isHost.Value ? GameMode.Host : GameMode.Client;
             GameLog.Log($"[Fusion] Deterministic Host Election: {targetMode}");
+        }
+        else
+        {
+            // ไม่มีข้อมูล host ที่แน่นอน → ใช้ AutoHostOrClient ซึ่งเสี่ยง race (สองเครื่องสร้างห้องพร้อมกัน)
+            // ใช้ LogWarning เพื่อให้เห็นใน logcat แม้ใน release build (fallback = สัญญาณว่า players list/format ฝั่ง server มีปัญหา)
+            Debug.LogWarning("[Fusion] No deterministic host info — using AutoHostOrClient (race-prone). Check server players list / UUID format.");
         }
 
         // [FIX KEY] ถ้าเป็น Client → รอให้ Host สร้างห้องเสร็จก่อน ก่อนจะพยายามเข้าครั้งแรก
@@ -231,6 +245,9 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     // ──────────────────────────────────────────────────────────────────
     private IEnumerator StartGameCoroutineInternal(GameMode mode, string roomName, string sceneToLoad, Action<bool> onComplete, Action<string> onFailReason = null)
     {
+        // บังคับ region ให้ตรงกันทุกเครื่องก่อนต่อ Photon (กัน PC กับมือถือไปอยู่คนละ region แล้วหาห้องกันไม่เจอ)
+        ApplyFixedPhotonRegion();
+
         // Reset runner ก่อน
         yield return ResetRunnerCoroutine();
 
@@ -294,7 +311,10 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         }
         else if (fusionStartTask.IsCompletedSuccessfully)
         {
-            failReason = fusionStartTask.Result.ShutdownReason.ToString();
+            var startResult = fusionStartTask.Result;
+            failReason = $"{startResult.ShutdownReason} | msg='{startResult.ErrorMessage}'";
+            // log แบบเต็ม — ErrorMessage มักมีเหตุผลจริงจาก Photon (เช่น config/version mismatch, plugin error)
+            Debug.LogWarning($"[Fusion] StartGame result detail: mode={mode}, room={roomName}, reason={startResult.ShutdownReason}, msg='{startResult.ErrorMessage}', stack={startResult.StackTrace}");
         }
         else
         {
@@ -335,6 +355,35 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     public void Disconnect()
     {
         StartCoroutine(ResetRunnerCoroutine());
+    }
+
+    // บังคับ Photon FixedRegion ในโค้ดก่อน StartGame ทุกครั้ง — ไม่พึ่งค่าใน asset อย่างเดียว
+    // (Editor ที่เปิดค้างตอน git pull อาจยังถือ PhotonAppSettings เก่าที่ไม่มี region → ต่อ best-region แทน → คนละ region กับมือถือ)
+    private void ApplyFixedPhotonRegion()
+    {
+        if (!Fusion.Photon.Realtime.PhotonAppSettings.TryGetGlobal(out var photonSettings) || photonSettings.AppSettings == null)
+        {
+            Debug.LogWarning("[Fusion] Cannot access PhotonAppSettings.Global to force region.");
+            return;
+        }
+
+        // เปิด Photon log ละเอียด → เห็น region ที่ต่อจริง + return code ของ JoinRoom (เปิดเฉพาะตอนดีบัก)
+        if (verbosePhotonLog)
+        {
+            photonSettings.AppSettings.NetworkLogging = ExitGames.Client.Photon.DebugLevel.INFO;
+        }
+
+        if (string.IsNullOrWhiteSpace(fixedPhotonRegion))
+        {
+            return; // เว้นว่าง = ใช้ best region ตาม ping
+        }
+
+        string target = fixedPhotonRegion.Trim();
+        if (!string.Equals(photonSettings.AppSettings.FixedRegion, target, StringComparison.OrdinalIgnoreCase))
+        {
+            GameLog.Log($"[Fusion] Forcing Photon FixedRegion '{photonSettings.AppSettings.FixedRegion}' -> '{target}'");
+            photonSettings.AppSettings.FixedRegion = target;
+        }
     }
 
     public void OnPlayerJoined(NetworkRunner runner, PlayerRef player)
@@ -425,7 +474,11 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     }
 
     public void OnConnectRequest(NetworkRunner runner, NetworkRunnerCallbackArgs.ConnectRequest request, byte[] token) { }
-    public void OnConnectFailed(NetworkRunner runner, NetAddress remoteAddress, NetConnectFailedReason reason) { }
+    public void OnConnectFailed(NetworkRunner runner, NetAddress remoteAddress, NetConnectFailedReason reason)
+    {
+        // log ระดับ connection — ถ้า fail ที่นี่ = ต่อ game server ไม่ติด (คนละเรื่องกับ join room)
+        Debug.LogWarning($"[Fusion] OnConnectFailed: addr={remoteAddress}, reason={reason}");
+    }
     public void OnUserSimulationMessage(NetworkRunner runner, SimulationMessagePtr message) { }
     public void OnSessionListUpdated(NetworkRunner runner, List<SessionInfo> sessionList) { }
     public void OnCustomAuthenticationResponse(NetworkRunner runner, Dictionary<string, object> data) { }

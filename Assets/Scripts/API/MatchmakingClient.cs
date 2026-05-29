@@ -350,17 +350,11 @@ public class MatchmakingClient : MonoBehaviour
 
                 if (FusionManager.Instance != null)
                 {
-                    bool? isHost = null;
-                    if (response.players != null && response.players.Length > 0)
-                    {
-                        var sortedPlayers = response.players.OrderBy(p => p).ToArray();
-                        isHost = (sortedPlayers[0] == _currentPlayerId);
-                        GameLog.Log($"[Matchmaking] Deterministic Host check: Player={_currentPlayerId}, Host={sortedPlayers[0]}, IsHost={isHost}");
-                    }
+                    bool? isHost = ResolveDeterministicHost(response.players);
 
-                    FusionManager.Instance.StartMatchedGame(response.roomCode, gameSceneName, errorMsg => 
+                    FusionManager.Instance.StartMatchedGame(response.roomCode, gameSceneName, errorMsg =>
                     {
-                        SetErrorStatus(errorMsg);
+                        HandleFusionConnectFailed(errorMsg);
                     }, isHost);
                     return;
                 }
@@ -384,6 +378,45 @@ public class MatchmakingClient : MonoBehaviour
                     : response.message);
                 return;
         }
+    }
+
+    // เลือก host แบบ deterministic จากลิสต์ผู้เล่นที่ server ส่งมา
+    // normalize ทุก id ก่อนเทียบ เพื่อกัน format เพี้ยน (ตัวพิมพ์ใหญ่/ช่องว่าง/วงเล็บ) ที่ทำให้ทั้งคู่กลายเป็น Client แล้ว deadlock
+    private bool? ResolveDeterministicHost(string[] players)
+    {
+        if (players == null || players.Length == 0)
+        {
+            Debug.LogWarning("[Matchmaking] Matched response has no players list. Falling back to AutoHostOrClient.");
+            return null;
+        }
+
+        string[] normalized = players
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .Select(p => TryNormalizeUuid(p, out string n) ? n : p.Trim().ToLowerInvariant())
+            .OrderBy(p => p, StringComparer.Ordinal)
+            .ToArray();
+
+        if (normalized.Length == 0 || !normalized.Contains(_currentPlayerId))
+        {
+            // ตัวเองไม่อยู่ในลิสต์ = format ฝั่ง server ไม่ตรงกับ client → อย่าเดา host เอง ปล่อย AutoHostOrClient กัน deadlock
+            Debug.LogError($"[Matchmaking] Self not found in matched players list. self={_currentPlayerId}, players=[{string.Join(", ", normalized)}]. Falling back to AutoHostOrClient.");
+            return null;
+        }
+
+        bool isHost = normalized[0] == _currentPlayerId;
+        GameLog.Log($"[Matchmaking] Deterministic Host check: self={_currentPlayerId}, host={normalized[0]}, isHost={isHost}");
+        return isHost;
+    }
+
+    // เรียกเมื่อ matched แล้วแต่ต่อ Fusion ไม่สำเร็จ — เคลียร์สถานะให้กด Find Match ใหม่ได้สะอาด (กดปุ่ม X เพื่อปิด แล้วค้นใหม่)
+    private void HandleFusionConnectFailed(string errorMessage)
+    {
+        _isConnectingToFusion = false;
+        _searchRequestId = string.Empty;
+        ClearSavedMatch();
+        SetErrorStatus(string.IsNullOrWhiteSpace(errorMessage)
+            ? "Connection failed. Tap X then search again."
+            : errorMessage);
     }
 
     private static MatchmakingResponsePayload TryParseResponsePayload(string json)
