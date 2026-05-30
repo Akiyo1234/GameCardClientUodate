@@ -170,6 +170,22 @@ public partial class GameController
         EndTurn();
     }
 
+    // แตะการ์ดที่จองไว้ → เปิด popup ดูแบบใหญ่ (ซื้อจากในปุ่มของ popup)
+    // ถ้ายังไม่ได้ผูก cardPreviewPopup ใน Inspector → fallback เป็นพฤติกรรมเดิม (ซื้อทันที)
+    public void ShowReservedCardPreview(CardDisplay card)
+    {
+        if (card == null || card.data == null) return;
+
+        if (cardPreviewPopup != null)
+        {
+            cardPreviewPopup.Show(card);
+        }
+        else
+        {
+            BuyReservedCard(card);
+        }
+    }
+
     public void BuyReservedCard(CardDisplay card)
     {
         if (BlockActionDuringQuiz()) return;
@@ -258,10 +274,11 @@ public partial class GameController
             if (!usedCardIds.Contains(card.cardId)) availableCards.Add(card);
         }
 
-        // ถ้าหมดกองแล้ว ไม่สุ่มใบใหม่ขึ้นมา
+        // ถ้าหมดกองแล้ว วาง "ช่องว่าง" ไว้แทน เพื่อรักษาตำแหน่งช่อง (กัน LayoutGroup ดันการ์ดที่เหลือเลื่อน)
         if (availableCards.Count == 0)
         {
-            GameLog.Log($"[GameController] กอง Tier {tier} หมดแล้ว ไม่มีการ์ดให้สุ่มเพิ่ม");
+            GameLog.Log($"[GameController] กอง Tier {tier} หมดแล้ว ไม่มีการ์ดให้สุ่มเพิ่ม — วางช่องว่างแทน");
+            SpawnEmptyCardSlot(container, slotIndex);
             return;
         }
 
@@ -296,6 +313,27 @@ public partial class GameController
         tier2Cards = CardDatabaseLoader.Tier2Cards;
         tier3Cards = CardDatabaseLoader.Tier3Cards;
         GameLog.Log($"[GameController] โหลดการ์ดจาก JSON สำเร็จ! T1:{tier1Cards.Count} T2:{tier2Cards.Count} T3:{tier3Cards.Count}");
+    }
+
+    // วาง "ช่องว่าง" (placeholder มองไม่เห็น กดไม่ได้) เพื่อรักษาตำแหน่ง slot ตอนกองการ์ดหมด
+    // → การ์ดที่เหลือไม่เลื่อน และ board snapshot ยังเก็บตำแหน่งช่องว่างได้ (data == null → string.Empty)
+    GameObject SpawnEmptyCardSlot(Transform container, int slotIndex = -1)
+    {
+        if (container == null || cardPrefab == null) return null;
+
+        GameObject slot = Instantiate(cardPrefab, container);
+        slot.name = "EmptyCardSlot";
+
+        // ไม่มีข้อมูล → กดซื้อไม่ได้ (OnShortTap และบอทเช็ค data == null อยู่แล้ว)
+        CardDisplay cd = slot.GetComponent<CardDisplay>();
+        if (cd != null) cd.data = null;
+
+        // ซ่อนรูป + ให้กดทะลุ (ไม่บังการกดอย่างอื่น)
+        UnityEngine.UI.Image img = slot.GetComponent<UnityEngine.UI.Image>();
+        if (img != null) { img.enabled = false; img.raycastTarget = false; }
+
+        if (slotIndex >= 0) slot.transform.SetSiblingIndex(slotIndex);
+        return slot;
     }
 
     // ───────── Container util (used by board spawn + network resync) ─────────

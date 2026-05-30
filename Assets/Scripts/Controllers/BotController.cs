@@ -10,6 +10,88 @@ public class BotController : MonoBehaviour
     // key = resource index (0-4), value = ResourceButton
     private Dictionary<int, ResourceButton> _colorToButtonCache;
 
+    // ─── Bot Personality Profiles (คงที่ตาม seat ตลอดทั้งเกม) ──────────────
+    // บอทแต่ละ seat ได้บุคลิกตายตัว → ตัดสินใจต่างกันแม้เจอสถานการณ์เดียวกัน
+    // โดยใช้ตรรกะเดิมทั้งหมด แค่ปรับน้ำหนัก/threshold ตามบุคลิก
+    private enum BotArchetype { Balanced, Aggressive, Hoarder, Specialist }
+
+    private struct BotProfile
+    {
+        public BotArchetype archetype;
+        public float vpWeight;         // เน้นการ์ดแต้มสูง (มาก) vs เน้นการ์ดถูก (น้อย)
+        public bool  reserveEnabled;   // ชอบจองการ์ดไหม
+        public int   reserveMaxMissing;// จองเมื่อขาดเหรียญไม่เกินกี่อัน
+        public float suboptimalChance; // โอกาสเลือกตัวเลือกอันดับรอง (ความไม่แน่นอน)
+        public int[] colorBias;        // สีที่ชอบเป็นพิเศษ (null = ไม่เจาะจง)
+    }
+
+    private readonly Dictionary<int, BotProfile> _profileCache = new Dictionary<int, BotProfile>();
+    private BotProfile _activeProfile; // profile ของบอทที่กำลังเล่นในเทิร์นปัจจุบัน
+
+    private BotProfile GetProfile(int seatIndex)
+    {
+        if (_profileCache.TryGetValue(seatIndex, out BotProfile cached))
+            return cached;
+
+        // กำหนดบุคลิกคงที่ตาม seat (วนตาม archetype 4 แบบ)
+        BotArchetype type = (BotArchetype)(((seatIndex % 4) + 4) % 4);
+        BotProfile profile = new BotProfile { archetype = type };
+
+        switch (type)
+        {
+            case BotArchetype.Aggressive: // เน้นซื้อการ์ดแต้มสูง ไม่ค่อยจอง
+                profile.vpWeight          = 2.0f;
+                profile.reserveEnabled    = false;
+                profile.reserveMaxMissing = 1;
+                profile.suboptimalChance  = 0.05f;
+                profile.colorBias         = null;
+                break;
+
+            case BotArchetype.Hoarder:    // ชอบจองเก็บ/สะสมทอง เลือกการ์ดถูก
+                profile.vpWeight          = 0.8f;
+                profile.reserveEnabled    = true;
+                profile.reserveMaxMissing = 3;
+                profile.suboptimalChance  = 0.20f;
+                profile.colorBias         = null;
+                break;
+
+            case BotArchetype.Specialist: // โฟกัส 2 สีที่ชอบ
+                profile.vpWeight          = 1.2f;
+                profile.reserveEnabled    = true;
+                profile.reserveMaxMissing = 2;
+                profile.suboptimalChance  = 0.15f;
+                profile.colorBias         = PickBiasColors(seatIndex, 2);
+                break;
+
+            default:                      // Balanced = ตรรกะเดิมทุกอย่าง
+                profile.vpWeight          = 1.0f;
+                profile.reserveEnabled    = true;
+                profile.reserveMaxMissing = 2;
+                profile.suboptimalChance  = 0f;
+                profile.colorBias         = null;
+                break;
+        }
+
+        _profileCache[seatIndex] = profile;
+        GameLog.Log($"<color=orange>[Bot] Seat {seatIndex + 1} บุคลิก: {type}</color>");
+        return profile;
+    }
+
+    // สุ่มสีที่ชอบแบบคงที่ต่อ seat — ใช้ System.Random แยก ไม่กวน UnityEngine.Random ของเกม
+    private int[] PickBiasColors(int seatIndex, int count)
+    {
+        System.Random rng = new System.Random(seatIndex * 7919 + 13);
+        List<int> pool = new List<int> { 0, 1, 2, 3, 4 };
+        List<int> picked = new List<int>();
+        for (int i = 0; i < count && pool.Count > 0; i++)
+        {
+            int idx = rng.Next(pool.Count);
+            picked.Add(pool[idx]);
+            pool.RemoveAt(idx);
+        }
+        return picked.ToArray();
+    }
+
     void Awake()
     {
         gameController = GetComponent<GameController>();
@@ -41,8 +123,9 @@ public class BotController : MonoBehaviour
         PlayerUI botPlayer = gameController.players[playerIndex];
         // [FIX] null-safe nameText + รีเฟรช cache ถ้ายังไม่มี
         _colorToButtonCache = null; // invalidate cache ทุก turn เผื่อ bankButtons เปลี่ยน
+        _activeProfile = GetProfile(playerIndex); // โหลดบุคลิกของบอท seat นี้
         string botName = botPlayer?.nameText != null ? botPlayer.nameText.text : $"Bot {playerIndex + 1}";
-        GameLog.Log($"<color=orange>[Bot] เริ่มเทิร์นของบอท: {botName}</color>");
+        GameLog.Log($"<color=orange>[Bot] เริ่มเทิร์นของบอท: {botName} ({_activeProfile.archetype})</color>");
 
         bool actionTaken = false;
         // [FIX] ครอบ try/finally รับประกันว่าถ้าเกิด Exception หรือทุก action ล้มเหลว
@@ -121,25 +204,49 @@ public class BotController : MonoBehaviour
 
     private CardDisplay FindBestAffordableCard(PlayerUI player)
     {
+        // ให้คะแนนการ์ด = แต้ม × vpWeight − ต้นทุนรวม (Aggressive เน้นแต้ม, Hoarder เน้นถูก)
+        // + โบนัสเล็กน้อยถ้าการ์ดใช้สีที่บอทชอบ (Specialist)
         var affordableCards = GetAllCardsOnBoard().Concat(GetReservedCards(player))
             .Where(c => CanAfford(player, c.data))
-            .OrderByDescending(c => c.data.victoryPoints)
-            .ThenBy(c => GetTotalCost(c.data))
+            .OrderByDescending(c => ScoreCard(c.data))
             .ToList();
 
-        return affordableCards.FirstOrDefault();
+        if (affordableCards.Count == 0) return null;
+
+        // ความไม่แน่นอน: บางครั้งเลือกตัวเลือกอันดับรองแทนอันดับ 1
+        if (affordableCards.Count > 1 && Random.value < _activeProfile.suboptimalChance)
+            return affordableCards[1];
+
+        return affordableCards[0];
+    }
+
+    private float ScoreCard(CardData card)
+    {
+        float score = card.victoryPoints * _activeProfile.vpWeight - GetTotalCost(card) * 0.05f;
+
+        if (_activeProfile.colorBias != null)
+        {
+            foreach (int biasColor in _activeProfile.colorBias)
+            {
+                if (biasColor >= 0 && biasColor < 5 && card.costs[biasColor] > 0)
+                    score += 0.5f; // ชอบการ์ดที่ใช้สีถนัด
+            }
+        }
+
+        return score;
     }
 
     private CardDisplay FindReserveTarget(PlayerUI player)
     {
+        if (!_activeProfile.reserveEnabled) return null; // บอทบางบุคลิกไม่จองเชิงรุก
         if (player.reservedCards.Count >= 3) return null;
 
-        // มองหา Tier 3 ที่ขาดทรัพยากรแค่ 1-2 เหรียญ
+        // มองหา Tier 3 ที่ขาดทรัพยากรไม่เกิน threshold ของบุคลิกนี้
         var tier3Cards = GetCardsInContainer(gameController.tier3Container);
         foreach (var card in tier3Cards)
         {
             int missing = GetMissingCoinsCount(player, card.data);
-            if (missing > 0 && missing <= 2) return card;
+            if (missing > 0 && missing <= _activeProfile.reserveMaxMissing) return card;
         }
         return null;
     }
@@ -202,7 +309,7 @@ public class BotController : MonoBehaviour
             // ถ้าหยิบไม่ได้เลย (กองกลางว่างหมด) -> ต้องจำใจจองการ์ดซักใบเพื่อเอาทอง (ถ้ามีทอง) หรือข้ามเทิร์น
             GameLog.Log("[Bot] ไม่มีเหรียญให้หยิบ! พยายามจองการ์ดแทน");
             CardDisplay anyCard = GetAllCardsOnBoard().FirstOrDefault();
-            if (anyCard != null && player.reservedCards.Count < 3)
+            if (_activeProfile.reserveEnabled && anyCard != null && player.reservedCards.Count < 3)
             {
                 gameController.PromptReserveCard(anyCard);
                 gameController.ConfirmReserve();
@@ -298,11 +405,21 @@ public class BotController : MonoBehaviour
 
         foreach (var card in allCards)
         {
-            float weight = card.data.victoryPoints + 1.0f; // การ์ดมีแต้มสำคัญกว่า
+            float weight = card.data.victoryPoints * _activeProfile.vpWeight + 1.0f; // การ์ดมีแต้มสำคัญกว่า
             for (int i = 0; i < 5; i++)
             {
                 int needed = Mathf.Max(0, card.data.costs[i] - player.bonuses[i] - player.coins[i]);
                 scores[i] += needed * weight;
+            }
+        }
+
+        // โบนัสให้สีที่บอทถนัด (Specialist) → มีแนวโน้มเก็บสีเดิมซ้ำ ๆ
+        if (_activeProfile.colorBias != null)
+        {
+            foreach (int biasColor in _activeProfile.colorBias)
+            {
+                if (biasColor >= 0 && biasColor < 5)
+                    scores[biasColor] *= 1.6f;
             }
         }
 

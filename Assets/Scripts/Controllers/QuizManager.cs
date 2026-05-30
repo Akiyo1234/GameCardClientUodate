@@ -482,7 +482,8 @@ public class QuizManager : MonoBehaviour
         {
             // โหมดคนเดียว ประมวลผลทันที
             isQuizActive = false;
-            ProcessQuizResults(currentAnswers);
+            // ส่งรางวัลให้ตรงกับโหมดออนไลน์: เหรียญดำ 1 เหรียญ (แยกจากกองกลาง) ให้เฉพาะคนตอบถูกเร็วสุด
+            ProcessQuizResults(currentAnswers, DetermineRewardGemIndices(currentAnswers));
         }
     }
 

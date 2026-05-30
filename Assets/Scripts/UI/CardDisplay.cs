@@ -56,9 +56,58 @@ public class CardDisplay : MonoBehaviour, IPointerDownHandler, IPointerUpHandler
     // 1. เมื่อเริ่มแตะจอ
     public void OnPointerDown(PointerEventData eventData)
     {
+        // กดโดนขอบโปร่งใส (นอกกรอบรูปจริงหลัง PreserveAspect) = ไม่นับ กันการ "กดรอบๆ การ์ดแล้วซื้อได้"
+        if (!IsPointInsideVisibleArt(eventData))
+        {
+            isPointerDown = false;
+            return;
+        }
+
         isPointerDown = true;
         timePressed = 0f;
         isLongPressTriggered = false;
+    }
+
+    // เช็คว่าจุดที่แตะอยู่ในกรอบรูปการ์ดที่มองเห็นจริงไหม
+    // RectTransform ที่กดได้ (raycast) ใหญ่กว่ารูปเมื่อ PreserveAspect ย่อรูปให้พอดี → เกิดขอบโปร่งใสที่ยังกดได้
+    private bool IsPointInsideVisibleArt(PointerEventData eventData)
+    {
+        // ไม่มีรูป / ไม่ได้เปิด PreserveAspect → กดได้ทั้ง rect ตามเดิม (ไม่มีขอบให้กันอยู่แล้ว)
+        if (cardImage == null || cardImage.sprite == null || !cardImage.preserveAspect)
+        {
+            return true;
+        }
+
+        RectTransform rt = cardImage.rectTransform;
+        if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(rt, eventData.position, eventData.pressEventCamera, out Vector2 local))
+        {
+            return true; // แปลงพิกัดไม่ได้ → ปล่อยผ่าน ดีกว่ากดไม่ติด
+        }
+
+        Rect r = rt.rect;
+        if (r.width <= 0f || r.height <= 0f)
+        {
+            return true;
+        }
+
+        float spriteAspect = cardImage.sprite.rect.width / cardImage.sprite.rect.height;
+        float rectAspect = r.width / r.height;
+
+        // คำนวณกรอบรูปจริงหลัง PreserveAspect (จัดกึ่งกลางใน rect)
+        float fittedW = r.width;
+        float fittedH = r.height;
+        if (spriteAspect > rectAspect)
+        {
+            fittedH = r.width / spriteAspect; // เต็มความกว้าง เหลือขอบบน-ล่าง
+        }
+        else
+        {
+            fittedW = r.height * spriteAspect; // เต็มความสูง เหลือขอบซ้าย-ขวา
+        }
+
+        Vector2 center = r.center;
+        return Mathf.Abs(local.x - center.x) <= fittedW * 0.5f
+            && Mathf.Abs(local.y - center.y) <= fittedH * 0.5f;
     }
 
     // 2. เมื่อยกนิ้วขึ้น
@@ -94,10 +143,11 @@ public class CardDisplay : MonoBehaviour, IPointerDownHandler, IPointerUpHandler
         if (gameController == null) gameController = FindFirstObjectByType<GameController>();
         if (gameController == null) return;
 
-        GameLog.Log($"[แตะสั้นๆ] สั่งซื้อการ์ด ID: {data.cardId}");
+        GameLog.Log($"[แตะสั้นๆ] การ์ด ID: {data.cardId} (จอง={isReserved})");
 
         if (isReserved) {
-            gameController.BuyReservedCard(this);
+            // แตะการ์ดจอง → เปิด popup ดูใหญ่ก่อน (ซื้อจากในปุ่มของ popup)
+            gameController.ShowReservedCardPreview(this);
         } else {
             gameController.OnCardClicked(this);
         }

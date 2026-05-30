@@ -68,8 +68,12 @@ public partial class GameController : MonoBehaviour
     public TextMeshProUGUI turnCountText; // [NEW] ลาก Text บอกลำดับเทิร์นมาใส่ที่นี่
     public ResultScreenUI resultScreen; // หน้าต่างสรุปผลอเนกประสงค์
     [Header("---- Reserve Confirmation UI ----")]
-    public GameObject confirmReservePanel; 
+    public GameObject confirmReservePanel;
     public CardDisplay pendingReserveCard;
+
+    [Header("---- Card Preview Popup ----")]
+    [Tooltip("popup แสดงการ์ดที่จองแบบใหญ่ (ผูก component CardPreviewPopup)")]
+    public CardPreviewPopup cardPreviewPopup;
 
     [Header("---- Bot Settings ----")]
     [SerializeField] private float botTurnDelayMin = 0.5f;
