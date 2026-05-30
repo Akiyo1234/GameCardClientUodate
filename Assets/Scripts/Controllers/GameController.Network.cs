@@ -312,7 +312,8 @@ public partial class GameController
                 Score = player != null ? player.currentScore : 0,
                 Coins = player != null ? (int[])player.coins.Clone() : new int[6],
                 Bonuses = player != null ? (int[])player.bonuses.Clone() : new int[5],
-                QuizBlackCoins = player != null ? player.quizBlackCoins : 0
+                QuizBlackCoins = player != null ? player.quizBlackCoins : 0,
+                ReservedCardIds = player != null ? player.reservedCards.Select(c => c.cardId).ToArray() : System.Array.Empty<string>()
             };
         }
 
@@ -364,6 +365,11 @@ public partial class GameController
                 }
 
                 player.UpdateUI();
+
+                if (snapshot.Players[i].ReservedCardIds != null)
+                {
+                    RebuildReservedAreaIfChanged(player, snapshot.Players[i].ReservedCardIds);
+                }
             }
         }
 
@@ -505,6 +511,77 @@ public partial class GameController
         }
 
         return null;
+    }
+
+    private void RebuildReservedAreaIfChanged(PlayerUI player, string[] cardIds)
+    {
+        if (player == null || cardIds == null)
+        {
+            return;
+        }
+
+        // เทียบสถานะปัจจุบันกับที่รับมา
+        List<string> incoming = new List<string>();
+        foreach (string id in cardIds)
+        {
+            if (!string.IsNullOrEmpty(id)) incoming.Add(id);
+        }
+
+        List<string> current = new List<string>();
+        if (player.reservedCards != null)
+        {
+            foreach (CardData card in player.reservedCards)
+            {
+                if (card != null) current.Add(card.cardId);
+            }
+        }
+
+        if (incoming.Count == current.Count)
+        {
+            bool identical = true;
+            for (int i = 0; i < incoming.Count; i++)
+            {
+                if (incoming[i] != current[i]) { identical = false; break; }
+            }
+            if (identical) return;
+        }
+
+        // เคลียร์และสร้างข้อมูลใหม่
+        if (player.reservedCards != null)
+        {
+            player.reservedCards.Clear();
+            foreach (string id in incoming)
+            {
+                CardData data = FindCardDataById(id);
+                if (data != null)
+                {
+                    player.reservedCards.Add(data);
+                }
+                else
+                {
+                    Debug.LogWarning($"[GameController] ไม่พบ CardData '{id}' ตอน sync reserved cards ของผู้เล่น {player.nameText?.text}");
+                }
+            }
+        }
+
+        // เคลียร์และสร้าง UI ใหม่
+        if (player.reservedAreaTransform != null && cardPrefab != null)
+        {
+            ClearContainer(player.reservedAreaTransform);
+            foreach (CardData data in player.reservedCards)
+            {
+                GameObject resCard = Instantiate(cardPrefab, player.reservedAreaTransform);
+                resCard.transform.localScale = new Vector3(0.6f, 0.6f, 1f);
+
+                CardDisplay resDisplay = resCard.GetComponent<CardDisplay>();
+                if (resDisplay != null)
+                {
+                    resDisplay.LoadCardData(data);
+                    resDisplay.isReserved = true;
+                    resDisplay.ownerUI = player;
+                }
+            }
+        }
     }
 
     // ───────── Player panel layout rotation (host ≠ คนแรกใน scene ของแต่ละ client) ─────────

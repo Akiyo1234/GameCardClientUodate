@@ -54,7 +54,7 @@ public class AuthManagerUI : MonoBehaviour
             statusText.raycastTarget = false;
     }
 
-    private void Start()
+    private async void Start()
     {
         ShowLoginPanel();
 
@@ -65,6 +65,46 @@ public class AuthManagerUI : MonoBehaviour
         }
 
         GameLog.Log("[Auth] Ready");
+
+        // --- ระบบ Auto Login (Remember Me) ---
+        _isProcessing = true;
+        SetStatus("กำลังตรวจสอบสถานะการเข้าสู่ระบบ (Auto Login)...", Color.yellow);
+        SetBlocker(true);
+
+        // รอจนกว่า Supabase จะถูก Initialized เสร็จสมบูรณ์
+        while (SupabaseManager.Instance == null || !SupabaseManager.Instance.IsInitialized)
+        {
+            await Task.Yield();
+        }
+
+        // ตรวจสอบว่ามีผู้ใช้ล็อกอินค้างไว้หรือไม่
+        if (SupabaseManager.Instance.Client.Auth.CurrentUser != null)
+        {
+            GameLog.Log("[Auth] Found active session. Auto-logging in...");
+            SetStatus("เข้าสู่ระบบอัตโนมัติสำเร็จ! กำลังเข้าเกม...", Color.green);
+            
+            // รอให้โหลด Profile เสร็จสมบูรณ์ (รอแปบนึงเพื่อความชัวร์ หรือจริงๆ SupabaseManager โหลดให้แล้ว)
+            await Task.Delay(1000); 
+
+            // ใช้ Context เพื่อความปลอดภัยบน Main Thread ในการเปลี่ยนซีน
+            if (_mainThreadContext != null)
+            {
+                _mainThreadContext.Post(_ => {
+                    SceneManager.LoadScene(nextSceneName);
+                }, null);
+            }
+            else
+            {
+                SceneManager.LoadScene(nextSceneName);
+            }
+        }
+        else
+        {
+            // ถ้าไม่มี Session ค้างอยู่ ให้ปลดล็อกหน้าจอเพื่อให้ผู้เล่นพิมพ์ล็อกอินเอง
+            _isProcessing = false;
+            SetStatus("กรุณาเข้าสู่ระบบ", Color.white);
+            SetBlocker(false);
+        }
     }
 
     // ───── public UI callbacks ─────
