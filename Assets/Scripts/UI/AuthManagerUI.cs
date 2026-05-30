@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 using System.Threading.Tasks;
 using TMPro;
 using UnityEngine;
@@ -29,7 +28,11 @@ public class AuthManagerUI : MonoBehaviour
     public string nextSceneName = "MainMenu 1";
 
     [Header("Register Page")]
+    [Tooltip("เว้นว่างได้ — ถ้าว่างจะใช้ DefaultRegisterUrl (GitHub Pages) อัตโนมัติ")]
     public string registerUrl = "";
+
+    // หน้า register ที่โฮสต์บน GitHub Pages (render HTML ได้จริง ต่างจากโดเมน supabase.co)
+    private const string DefaultRegisterUrl = "https://akiyo1234.github.io/GameCardClientUodate/";
 
     // ───── state ─────
     private bool _isProcessing = false;
@@ -101,40 +104,22 @@ public class AuthManagerUI : MonoBehaviour
     public void OnRegisterButtonClicked()
     {
         AudioManager.Instance?.PlayButtonClick();
-        GameLog.Log("[Auth] OnRegisterButtonClicked called!");
 
-        // ถ้าเป็น http/https → เปิด browser ตรงๆ
-        if (!string.IsNullOrWhiteSpace(registerUrl) &&
-            (registerUrl.StartsWith("http://") || registerUrl.StartsWith("https://")))
+        // ใช้ registerUrl จาก Inspector เฉพาะเมื่อเป็นลิงก์ http/https ที่ใช้ได้จริง
+        // ถ้าว่าง หรือเป็นค่าอื่น (เช่น path "file://..." ของเครื่อง dev ที่บนมือถือไม่มี) → ใช้หน้า GitHub Pages
+        // หมายเหตุ: โฮสต์บนโดเมน supabase.co ไม่ได้ มันบังคับ HTML เป็น text/plain (กัน phishing)
+        string url = registerUrl;
+        if (string.IsNullOrWhiteSpace(url) ||
+            !(url.StartsWith("http://") || url.StartsWith("https://")))
         {
-            GameLog.Log("[Auth] Opening web URL: " + registerUrl);
-            try { Application.OpenURL(registerUrl); }
-            catch (Exception ex) { Debug.LogError("[Auth] OpenURL error: " + ex.Message); }
-            return;
+            url = DefaultRegisterUrl;
         }
 
-        // fallback → local StreamingAssets/Web/index.html
-        string fallback = System.IO.Path.Combine(
-            Application.streamingAssetsPath, "Web", "index.html");
+        GameLog.Log("[Auth] Opening register URL: " + url);
 
-        GameLog.Log("[Auth] Opening local file: " + fallback);
-
-        if (System.IO.File.Exists(fallback))
-        {
-            try
-            {
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = fallback,
-                    UseShellExecute = true
-                });
-            }
-            catch (Exception ex) { Debug.LogError("[Auth] Process.Start error: " + ex.Message); }
-        }
-        else
-        {
-            Debug.LogError("[Auth] ไม่พบ StreamingAssets/Web/index.html และไม่ได้ตั้ง registerUrl ใน Inspector");
-        }
+        // url เป็น http/https เสมอ → เปิดเบราว์เซอร์ (ใช้ได้ทั้งมือถือและเดสก์ท็อป)
+        try { Application.OpenURL(url); }
+        catch (Exception ex) { Debug.LogError("[Auth] OpenURL error: " + ex.Message); }
     }
 
     private System.Collections.IEnumerator LoginCoroutine(string email, string password)
