@@ -11,18 +11,42 @@ using System.Linq;
 using System.Text;
 using System.Globalization;
 
+// =============================================================================
+// FusionManager — หัวใจหลักของระบบ Multiplayer (Photon Fusion)
+// -----------------------------------------------------------------------
+// หน้าที่:
+//   1. สร้าง/เข้าร่วมห้องผ่าน Photon Fusion (Host/Client/AutoHostOrClient)
+//   2. ส่งข้อมูลผ่าน SendReliableDataToPlayer (text-based protocol)
+//   3. รับข้อมูลใน OnReliableDataReceived และ route ไปยัง events ที่ถูกต้อง
+//   4. อัปเดต LobbyUI เมื่อผู้เล่นเข้า/ออกห้อง
+//   5. Sync สถานะห้อง (waiting/playing/finished) ไปยัง Supabase
+// -----------------------------------------------------------------------
+// Network Message Protocol (ใช้ | เป็นตัวคั่น field):
+//   NAME|playerId|playerName       → ส่งชื่อผู้เล่น
+//   TURN|playerIdx|round|total|disp → สะสถานะเทิร์น
+//   ECON|bankCoins|playerData       → เศรษฐกิจ (bank, เหรียญ, คะแนน)
+//   BOARD|t1|t2|t3|used            → การ์ดบนกระดาน
+//   QUIZSTART|questionIndex         → หาก Host เริ่มควิซ
+//   QUIZANSWER|playerIdx|bool|time  → Client ส่งคำตอบ
+//   QUIZRESULT|answers|rewardIndices→ Host ประกาศผล
+//   QUIZREQ|──                      → Client ขอให้เริ่มควิซ
+//   STATEREQ|──                     → Late-joiner ขอ Full State
+// -----------------------------------------------------------------------
+// Pattern: Singleton + DontDestroyOnLoad (ผ่าน Awake)
+// =============================================================================
 public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
 {
+    // Singleton instance และ Events ที่ GameController subscribe ไว้
     public static FusionManager Instance { get; private set; }
-    public event Action PlayerNamesUpdated;
-    public event Action ActivePlayersChanged;
-    public event Action<int, int, int, int> TurnStateReceived;
-    public event Action<int> QuizStartedReceived;
-    public event Action<QuizAnswerSnapshot> QuizAnswerReceived;
-    public event Action<List<QuizAnswerSnapshot>, List<int>> QuizResultsReceived;
-    public event Action<EconomyStateSnapshot> EconomyStateReceived;
-    public event Action<BoardStateSnapshot> BoardStateReceived;
-    public event Action QuizStartRequested;
+    public event Action PlayerNamesUpdated;       // เมื่อรับชื่อผู้เล่นคนใดก็ตาม
+    public event Action ActivePlayersChanged;     // เมื่อคนเข้า/ออกห้อง
+    public event Action<int, int, int, int> TurnStateReceived;  // ชุด Turn State (player, round, total, display)
+    public event Action<int> QuizStartedReceived;               // เมื่อรับคำสั่งเริ่มควิซจาก Host
+    public event Action<QuizAnswerSnapshot> QuizAnswerReceived; // Host รับคำตอบจาก Client
+    public event Action<List<QuizAnswerSnapshot>, List<int>> QuizResultsReceived; // ผลควิซจาก Host
+    public event Action<EconomyStateSnapshot> EconomyStateReceived;  // สถานะเศรษฐกิจ
+    public event Action<BoardStateSnapshot> BoardStateReceived;      // สถานะกระดาน
+    public event Action QuizStartRequested;       // Client ขอเริ่มควิซ
     // late-joiner ขอ full state จาก host — ส่ง playerId ของคนที่ขอ เพื่อให้ host ตอบกลับเฉพาะคนนั้น
     public event Action<int> FullStateRequested;
 
@@ -102,6 +126,13 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     public NetworkRunner Runner => _runner;
     public int ActivePlayerCount => _runner == null ? 0 : _runner.ActivePlayers.Count();
 
+    // =============================================================================
+    // StartMatchedGame — เริ่มเกมหลัง Matchmaking
+    // -----------------------------------------------------------------------
+    // isHost=true  → เป็น Host สร้างห้องผ่าน Supabase Edge Function แล้ว
+    // isHost=false → เป็น Client รอให้ Host สร้างห้องก่อน (initial delay 4 วิ + retry 24 ครั้ง)
+    // ถ้าไม่ระบุ isHost → ใช้ AutoHostOrClient (เสี่ยง race condition)
+    // =============================================================================
     public void StartMatchedGame(string roomCode, string sceneName = null, Action<string> onFail = null, bool? isHost = null)
     {
         // [FIX] ระบุว่าเป็นโหมดออนไลน์
@@ -484,6 +515,20 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     public void OnSessionListUpdated(NetworkRunner runner, List<SessionInfo> sessionList) { }
     public void OnCustomAuthenticationResponse(NetworkRunner runner, Dictionary<string, object> data) { }
     public void OnHostMigration(NetworkRunner runner, HostMigrationToken hostMigrationToken) { }
+    // =============================================================================
+    // OnReliableDataReceived — รับข้อมูล Network และ Route ไปยัง Event ที่ถูกต้อง
+    // -----------------------------------------------------------------------
+    // การ Route ข้อมูล (เช็ค payload.Split('|')[0]):
+    //   NAME       → เพิ่ม/อัปเดตชื่อผู้เล่น และ broadcast ต่อ (ถ้าเป็น Host)
+    //   TURN       → อัปเดต turn state + relay (ถ้าเป็น Host)
+    //   QUIZSTART  → Client เริ่มควิซตามคำสั่ง
+    //   QUIZREQ    → Host รับคำขอเริ่มควิซ
+    //   STATEREQ   → Host รับคำขอ Full State (late-joiner)
+    //   QUIZANSWER → Host รับคำตอบจาก Client
+    //   QUIZRESULT → Client รับผลควิซจาก Host
+    //   ECON       → อัปเดตเศรษฐกิจ + relay
+    //   BOARD      → อัปเดตกระดาน + relay
+    // =============================================================================
     public void OnReliableDataReceived(NetworkRunner runner, PlayerRef player, ReliableKey key, ArraySegment<byte> data)
     {
         string payload = Encoding.UTF8.GetString(data.Array, data.Offset, data.Count);

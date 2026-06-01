@@ -28,7 +28,11 @@ public partial class GameController
 {
     // ───────── Turn order / state setters ─────────
 
-    // ฟังก์ชันรับคิวการเล่นใหม่จากควิซ
+    // =============================================================================
+    // ApplyNewTurnOrder — รับคิวใหม่จากผลควิซแล้ว Apply ทันที
+    // หลังควิซจบ: ผู้เล่นอันดับที่ 1 (ตอบเร็วสุด) จะได้เริ่มเทิร์นก่อน
+    // หลังจาก Apply: reset timer, อัปเดต UI, และ broadcast online
+    // =============================================================================
     public void ApplyNewTurnOrder(int[] newOrder)
     {
         playOrder = newOrder;
@@ -101,6 +105,12 @@ public partial class GameController
 
     // ───────── Action guards (input gating) ─────────
 
+    // =============================================================================
+    // BlockActionDuringQuiz — Guard ห้ามกดปุ่ม UI ระหว่างตอบควิซ
+    // BlockActionUntilContinue — Guard ห้ามกดปุ่มหลังดูผลควิซจนกว่าจะกด Continue
+    // IsLocalPlayersTurn — เช็คว่าเป็นเทิร์นของ Local Player จริงๆ
+    // BlockActionOutsideLocalTurn — Guard หลัก: ห้ามกดปุ่มในเทิร์นของคนอื่น/บอต
+    // =============================================================================
     private bool BlockActionDuringQuiz()
     {
         if (!isGameplayInputLocked) return false;
@@ -151,6 +161,17 @@ public partial class GameController
 
     // ───────── End-of-turn flow ─────────
 
+    // =============================================================================
+    // EndTurn — ฟังก์ชันจบเทิร์นหลัก (ผู้เล่นกดเอง หรือบอตเรียกจาก BotController)
+    // -----------------------------------------------------------------------
+    // สิ่งที่ทำในแต่ละเทิร์น:
+    //   1. จ่ายเหรียญที่เลือก (pending coins) ให้ผู้เล่นปัจจุบัน
+    //   2. เช็คขุนนาง (NobleManager.CheckClaim)
+    //   3. Publish Economy + Board State ผ่าน Fusion (Online)
+    //   4. เช็คเงื่อนไขชนะ (EvaluateWinCondition) — ถ้าชนะหยุดทันที
+    //   5. เลื่อน currentPlayerIndex (วนรอบถ้าครบทุกคน → ขึ้นรอบใหม่)
+    //   6. เช็คเงื่อนไขควิซ (shouldStartQuiz) ถ้าถึงรอบที่ quizInterval
+    // =============================================================================
     public void EndTurn()
     {
         if (BlockActionDuringQuiz()) return;
@@ -254,6 +275,15 @@ public partial class GameController
         CheckWinCondition();
     }
 
+    // =============================================================================
+    // CheckWinCondition — เช็คทุกเทิร์นว่ามีใครถึง winningScore (20 แต้ม) หรือยัง
+    // -----------------------------------------------------------------------
+    // ถ้ามีผู้ชนะ:
+    //   - คำนวณอันดับ (finishRank) เพื่อให้ Gem + MMR สมเหตุสมผล
+    //   - เขียนลง Supabase (ผ่าน PlayerDataService.SubmitMatchResultAsync)
+    //   - แสดง ResultScreen สรุปผล
+    //   - อัปเดตสถานะห้องใน Supabase เป็น 'finished'
+    // =============================================================================
     void CheckWinCondition()
     {
         if (isGameOver)
@@ -385,6 +415,12 @@ public partial class GameController
     // ───────── ForceEndTurn — Host-only, ไม่ตรวจ IsLocalPlayersTurn (bypass guards) ─────────
     // ใช้เมื่อ: (1) หมดเวลาและเป็นเทิร์นของ Remote Player/Bot
     //              (2) ผู้เล่นหลุดกลางเทิร์นและไม่มีตัวแทนในระบบ
+    // =============================================================================
+    // ForceEndTurn — บังคับจบเทิร์นโดยทั่ว Guard ทั้งหมด
+    // -----------------------------------------------------------------------
+    // ใช้เมื่อ: หมดเวลาหรือผู้เล่นหลุดในเทิร์นของคนอื่น/Bot
+    // ต่างจาก EndTurn: ไม่ตรวจ IsLocalPlayersTurn() — ผ่านได้ทุกกรณี
+    // =============================================================================
     public void ForceEndTurn()
     {
         if (isGameOver) return;

@@ -3,6 +3,24 @@ using System.Collections;
 using System.Collections.Generic;
 using TMPro; 
 
+// =============================================================================
+// GameController — ผู้ควบคุมหลักของเกมทั้งหมด
+// -----------------------------------------------------------------------
+// แบ่ง partial class ออกเป็น  5 ไฟล์ เพื่อความสะอาด:
+//   • GameController.cs        → ส่วน Core (ตัวแปร, Awake, Update, SetupPlayers)
+//   • GameController.Bank.cs   → ระบบธนาคารเหรียญกลาง (6 สี)
+//   • GameController.Cards.cs  → การซื้อ/จอง/จั่วการ์ด
+//   • GameController.Turns.cs  → การหมุนเทิร์น, เงื่อนไขชนะ
+//   • GameController.Bots.cs   → Bot AI (Offline)
+//   • GameController.Network.cs→ Online Sync ผ่าน Photon Fusion
+// -----------------------------------------------------------------------
+// ระบบหลัก:
+//   - เล่น 2 โหมด: Online (ผ่าน Photon Fusion) และ Offline (ใช้ Bot)
+//   - ควบคุม State Machine: รอเริ่ม → กำลังเล่น → จบเกม
+//   - ผู้เล่น 2-4 คน ใน Seats 0-3
+//   - คะแนนชนะ: ถึง winningScore (20 แต้ม) ก่อน EndTurn ใด
+// =============================================================================
+
 // [Refactor] ใช้ partial class แยกความรับผิดชอบของ GameController เป็นหลายไฟล์
 //   - GameController.cs        : core (fields, lifecycle, state)
 //   - GameController.Bots.cs   : bot AI execution
@@ -107,6 +125,19 @@ public partial class GameController : MonoBehaviour
     public int ActivePlayerCount => activePlayerCount;
     public int LocalPlayerSeatIndex => GetLocalPlayerUiIndex();
 
+    // =============================================================================
+    // Awake — เรียกครั้งแรกเมื่อ Object ถูกสร้าง (= คล้าย Constructor)
+    // -----------------------------------------------------------------------
+    // ขั้นตอน:
+    //   1. เช็คว่าเล่นโหมด Online หรือ Offline (IsMatchedOnlineSession)
+    //   2. Subscribe events จาก FusionManager (Network callbacks)
+    //   3. SetupPlayers — กำหนดชื่อ/ตัวละคร/สล็อตผู้เล่น
+    //   4. ConfigureBankCoins — กำหนดจำนวนเหรียญตามจำนวนผู้เล่น
+    //   5. SpawnResourceBank — สร้าง UI ปุ่มเหรียญสีต่างๆ 6 ปุ่ม
+    //   6. LoadCardDatabase — โหลด CardData จาก JSON
+    //   7. PopulateBoard — แจกการ์ดลงกระดาน Tier 1/2/3 (4 ใบต่อ tier)
+    //   8. Setup ขุนนาง (Noble) ผ่าน NobleManager
+    // =============================================================================
     void Awake()
     {
         isOnlineMatchMode = IsMatchedOnlineSession();
@@ -204,6 +235,10 @@ public partial class GameController : MonoBehaviour
         UnityEngine.SceneManagement.SceneManager.LoadScene("MainMenu 1");
     }
 
+    // =============================================================================
+    // Start — เรียกหลัง Awake เมื่อทุก Script ระหว่าง Awake เสร็จหมด
+    // — ตรวจว่าต้องรอคู่แข่งโหมด Online หรือเริ่มเกมได้เลย
+    // =============================================================================
     void Start()
     {
         ApplyNetworkPlayerNamesToUi();
@@ -219,6 +254,13 @@ public partial class GameController : MonoBehaviour
         StartInitialGameplay();
     }
 
+    // =============================================================================
+    // StartInitialGameplay — จุดส่งตัวเกม (เรียกครั้งเดียว)
+    // -----------------------------------------------------------------------
+    // Online Host   → Broadcast สถานะกระดาน/เศรษฐกิจ/เทิร์นให้ทุกคน
+    // Online Client → ขอ Full State จาก Host (late-joiner sync)
+    // Offline       → เริ่มควิซรอบแรกทันที
+    // =============================================================================
     private void StartInitialGameplay()
     {
         if (hasStartedInitialGameplay)
@@ -270,6 +312,7 @@ public partial class GameController : MonoBehaviour
         }
     }
 
+    // ล้าง subscriptions ทุกตัวเมื่อ Scene ถูกทำลาย — ป้องกัน memory leak
     void OnDestroy()
     {
         if (FusionManager.Instance != null)
@@ -289,6 +332,15 @@ public partial class GameController : MonoBehaviour
 
     // SetupNobles → moved to NobleManager.Setup() (Assets/Scripts/Controllers/NobleManager.cs)
 
+    // =============================================================================
+    // Update — Loop ที่สำคัญ: นับถอยเวลา Turn Timer + อัปเดต Timebar UI
+    // -----------------------------------------------------------------------
+    // ถ้าหมดเวลา (currentTurnTime ≤ 0) → บังคับ ForceEndTurn ทันที
+    // Guard เงื่อนไข:
+    //   - isGameOver        = เกมจบแล้ว
+    //   - isGameplayInputLocked = ระหว่างตอบควิซ
+    //   - isWaitingForContinue  = รอกด Continue หลังดูผล
+    // =============================================================================
     void Update()
     {
         if (isGameOver) return;

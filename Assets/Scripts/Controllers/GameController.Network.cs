@@ -20,6 +20,13 @@ public partial class GameController
 {
     // ───────── Top-level callbacks (รับจาก FusionManager events) ─────────
 
+    // =============================================================================
+    // HandleFullStateRequested — Host รับคำขอ Full State จาก Late-Joiner
+    // -----------------------------------------------------------------------
+    // ระบบ Late-Joiner:
+    //   Client เข้าห้องหลัง Host เริ่มเกมแล้ว → ขอสถานะล่าสุด (Board + Economy + Turn)
+    //   Host ส่งกลับเฉพาะคนนั้น (ไม่ broadcast ทั่ว — ไม่รีเซ็ท timer คนอื่น)
+    // =============================================================================
     // host: late-joiner ขอ full state มา → ส่ง board/economy/turn ปัจจุบันกลับเฉพาะคนที่ขอ
     private void HandleFullStateRequested(int requesterPlayerId)
     {
@@ -286,6 +293,15 @@ public partial class GameController
 
     // ───────── Economy state sync (bank + each player's coins/bonuses/score) ─────────
 
+    // =============================================================================
+    // PublishOnlineEconomyState + BuildEconomySnapshot + ApplyEconomySnapshot
+    // -----------------------------------------------------------------------
+    // Economy Snapshot = ภาพรวมเศรษฐกิจทั้งเกม:
+    //   - BankCoins: เหรียญในกองกลาง [6 สี]
+    //   - Players[]: ต่อใจแต่ละคน (Score, Coins, Bonuses, ReservedCards)
+    // Build = สร้าง snapshot จาก state ปัจจุบันในเครื่อง
+    // Apply = เขียนทับ snapshot ที่ได้รับมาลงในเครื่องนี้
+    // =============================================================================
     public void PublishOnlineEconomyState()
     {
         if (!isOnlineMatchMode || FusionManager.Instance == null)
@@ -378,6 +394,14 @@ public partial class GameController
 
     // ───────── Board state sync (face-up market) ─────────
 
+    // =============================================================================
+    // PublishOnlineBoardState + BuildBoardSnapshot + ApplyBoardSnapshot
+    // -----------------------------------------------------------------------
+    // Board Snapshot = สถานะการ์ดบนกระดาน (face-up market):
+    //   - Tier1/2/3CardIds: cardId สำหรับทุกช่อง (""=ช่องว่าง)
+    //   - UsedCardIds: card ที่ถูกจั่วแล้วทั้งหมด (กันการ์ดซ้ำข้ามเครื่อง)
+    // RebuildTierIfChanged — เทียบสถานะก่อนบน rebuild ทุกเทิร์น (กันการ์ดกระพริบ)
+    // =============================================================================
     public void PublishOnlineBoardState()
     {
         if (!isOnlineMatchMode || FusionManager.Instance == null)
@@ -588,6 +612,13 @@ public partial class GameController
 
     private Coroutine panelLayoutCoroutine;
 
+    // =============================================================================
+    // ConfigureOnlinePlayerPanelLayout — หมุน Player Panel
+    // -----------------------------------------------------------------------
+    // ปัญหา: ใน Online โหมด แต่ละ client มี localSeat ต่างกัน
+    // เช่น: localSeat=1 ควรเห็น ตัวเองอยู่ล่าง (panel[0]) เหมือน seat 0 สำหรับ คนที่ seat=0
+    // GetRotatedLayoutIndex — คำนวณ Index หลังหมุน โดย localSeat เสมออยู่ที่ตำแหน่ง 0
+    // =============================================================================
     private IEnumerator ConfigureOnlinePlayerPanelLayoutDeferred()
     {
         // รอให้ผ่าน layout pass + render ของเฟรมนี้ก่อน แล้วบังคับอัปเดต canvas ให้ตำแหน่งนิ่ง

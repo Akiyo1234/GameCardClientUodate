@@ -6,8 +6,21 @@ using Supabase;
 using Supabase.Gotrue;
 using System.Threading.Tasks;
 
+// =============================================================================
+// SupabaseManager — ระบบ Backend หลักของเกม
+// -----------------------------------------------------------------------
+// หน้าที่:
+//   1. เชื่อมต่อกับ Supabase (ฐานข้อมูล Cloud) ตั้งแต่เปิดแอปครั้งแรก
+//   2. จัดการ Authentication: ล็อกอิน / ออกจากระบบ
+//   3. ดึงชื่อผู้เล่น (Username) จาก User Metadata
+//   4. Rehydrate session อัตโนมัติเมื่อกลับจาก Background (Android/iOS)
+// -----------------------------------------------------------------------
+// Pattern: Singleton — มีแค่ 1 instance ตลอดชีวิตของแอป
+//          DontDestroyOnLoad เพื่อให้ข้อมูล auth ยังอยู่ข้าม Scene
+// =============================================================================
 public class SupabaseManager : MonoBehaviour
 {
+    // Singleton instance — สคริปต์อื่นเรียกผ่าน SupabaseManager.Instance
     public static SupabaseManager Instance { get; private set; }
 
     [Header("Supabase Credentials (ได้จากหน้าเว็บ)")]
@@ -26,7 +39,9 @@ public class SupabaseManager : MonoBehaviour
 
     private async void Awake()
     {
-        // ทำเป็น Singleton เพื่อให้สคริปต์นี้อยู่ยืดข้าม Scene
+        // ── Singleton Guard ──
+        // ถ้ามี Instance อยู่แล้ว (เช่น โหลดซ้ำจาก Scene อื่น) ให้ลบตัวใหม่ทิ้ง
+        // เพื่อไม่ให้มี SupabaseManager ซ้อนกัน 2 ตัว
         if (Instance != null && Instance != this)
         {
             Destroy(gameObject);
@@ -34,10 +49,11 @@ public class SupabaseManager : MonoBehaviour
         }
 
         Instance = this;
-        DontDestroyOnLoad(gameObject);
+        DontDestroyOnLoad(gameObject); // ทำให้ object นี้ไม่ถูกลบเมื่อเปลี่ยน Scene
 
-        // เริ่มต้นการเชื่อมต่อ Supabase ทันทีที่เปิดเกม
-        // ครอบ try/catch เพราะ async void ถ้า throw จะจับไม่ได้และทำให้แอปค้างเงียบ ๆ
+        // ── เริ่มต้นเชื่อมต่อ Supabase ทันทีตอน Awake ──
+        // ใช้ try/catch ครอบ async void เพราะถ้า exception หลุดออกมาใน async void
+        // Unity จะไม่ catch ได้ และแอปจะค้างโดยไม่มี error log
         try
         {
             await InitializeSupabase();
@@ -48,11 +64,15 @@ public class SupabaseManager : MonoBehaviour
         }
     }
 
+    // ── ขั้นตอนการเชื่อมต่อ Supabase ──
+    // 1. ตรวจว่ามี URL และ Key หรือยัง (ถ้าไม่ได้กรอกใน Inspector → ดึงจาก SupabaseConfig)
+    // 2. สร้าง Supabase.Client พร้อม AutoConnectRealtime
+    // 3. ถ้ามี session เก่า (Auto Login) → โหลด Profile จาก DB ทันที
     private async Task InitializeSupabase()
     {
         IsInitialized = false;
 
-        // ถ้าไม่ได้กรอกใน Inspector ให้ดึงค่าจาก SupabaseConfig (แหล่งเดียว)
+        // ถ้าไม่ได้กรอกใน Inspector ให้ดึงค่าจาก SupabaseConfig (แหล่งเดียว ไม่ hardcode)
         if (string.IsNullOrEmpty(supabaseUrl)) supabaseUrl = SupabaseConfig.Url;
         if (string.IsNullOrEmpty(supabaseKey)) supabaseKey = SupabaseConfig.AnonKey;
 
@@ -85,11 +105,15 @@ public class SupabaseManager : MonoBehaviour
     // หมายเหตุ: การสมัครสมาชิกย้ายไปทำที่หน้าเว็บ (StreamingAssets/Web/index.html)
     // ผ่านระบบ OTP (Edge Functions send-otp / verify-otp) แล้ว จึงไม่มี SignUpUser ในเกมอีกต่อไป
 
-    // ฟังก์ชันสำหรับเข้าสู่ระบบ (ส่งกลับสถานะสำเร็จ และ ข้อความ Error แบบเจาะจง)
+    // ── ระบบ Login ──
+    // รับ email + password → เรียก Supabase Auth.SignIn
+    // ถ้าสำเร็จ → โหลด PlayerProfile (Gems, MMR) จาก Database ทันที
+    // ส่งกลับ (true, "") ถ้าสำเร็จ หรือ (false, errorMsg) ถ้าล้มเหลว
     public async Task<(bool success, string errorMsg)> SignInUser(string email, string password)
     {
         try
         {
+            // ตัด whitespace ป้องกันการ login ผิดพลาดจากช่องว่างหน้า-หลัง
             email = email.Trim();
             password = password.Trim();
             
@@ -114,7 +138,9 @@ public class SupabaseManager : MonoBehaviour
         return (false, "เกิดข้อผิดพลาดไม่ทราบสาเหตุ");
     }
 
-    // [Helper] ดึง Username จาก User Metadata ใน Session ปัจจุบัน
+    // ── ดึงชื่อผู้เล่นที่ login อยู่ ──
+    // ดึงจาก UserMetadata (ฝั่ง Supabase Auth) ถ้ามี field "username" → ใช้นั้น
+    // ถ้าไม่มี → ใช้ Email แทน  ถ้ายัง login ไม่เข้า → ใช้ "Player 1" เป็น fallback
     public string GetCurrentUsername()
     {
         if (supabaseClient?.Auth.CurrentUser != null)
@@ -133,7 +159,9 @@ public class SupabaseManager : MonoBehaviour
     // ย้ายไป Edge Function แล้ว → ใช้ PlayerDataService.CreateRoomAsync() แทน
     // (server-authoritative, ใช้ service_role bypass RLS rooms_public_read)
 
-    // ฟังก์ชันสำหรับออกจากระบบ
+    // ── ออกจากระบบ (Logout) ──
+    // เรียก Supabase SignOut → ลบ key ที่เกี่ยวกับ auth + player data จาก PlayerPrefs
+    // ไม่ DeleteAll() เพราะจะลบ settings อื่นที่ไม่เกี่ยวด้วยทิ้งโดยไม่ตั้งใจ
     public async Task SignOut()
     {
         if (supabaseClient?.Auth != null)
@@ -158,12 +186,15 @@ public class SupabaseManager : MonoBehaviour
         }
     }
 
+    // ── จัดการ Session เมื่อแอปกลับมา Foreground (Android/iOS) ──
+    // pauseStatus=true = แอปถูก pause (ไปข้างหลัง)
+    // pauseStatus=false = แอปกลับมา Resume → ตรวจว่า session ยังใช้ได้ไหม
     private void OnApplicationPause(bool pauseStatus)
     {
         // เมื่อกลับเข้ามาที่แอป (Resume) บน Android/iOS
         if (!pauseStatus && IsInitialized && supabaseClient?.Auth != null)
         {
-            _ = RehydrateSessionAsync();
+            _ = RehydrateSessionAsync(); // เช็คและฟื้น session ที่อาจหมดอายุ
         }
     }
 

@@ -12,6 +12,13 @@ using UnityEngine;
 // ============================================================
 public partial class GameController
 {
+    // =============================================================================
+    // OnCardClicked — เมื่อกดการ์ดบนกระดาน (Short-tap)
+    // -----------------------------------------------------------------------
+    // Flow: ตรวจ Guard → ช่วยคำนวณต้นทุนจริง (cost - bonuses, หรือจ่ายด้วยทอง)
+    // ถ้าเหรียญพอ: Destroy การ์ด → จั่วใบใหม่ลงไปแทน → ผู้เล่นได้ Score + Bonus
+    // ถ้าเหรียญไม่พอ: แสดงคำเตือน
+    // =============================================================================
     public void OnCardClicked(CardDisplay card)
     {
         if (BlockActionDuringQuiz()) return;
@@ -19,7 +26,7 @@ public partial class GameController
         if (BlockActionOutsideLocalTurn()) return;
         if (isGameOver) return;
         if (IsCurrentPlayerBot() && !isExecutingBotTurn) {
-            ShowWarning("กำลังเป็นเทิร์นของบอท");
+            ShowWarning("กำลังเป็นเทิร์นของบอต");
             return;
         }
 
@@ -76,6 +83,17 @@ public partial class GameController
         }
     }
 
+    // =============================================================================
+    // PromptReserveCard / ConfirmReserve / CancelReserve / ExecuteReserve
+    // Flow การจองการ์ด (Long-press หรือปุ่ม Reserve):
+    // -----------------------------------------------------------------------
+    //   1. PromptReserveCard  → เปิด Confirm Panel
+    //   2. ConfirmReserve     → ถ้ายืนยัน → ExecuteReserve
+    //   3. CancelReserve      → ปิด Panel เฉยๆ
+    //   4. ExecuteReserve     → เพิ่มการ์ดลงในมือ (จำได้ ≤ 3 ใบ)
+    //                         → รับทอง (Gold) 1 อัน (ถ้าเหรียญในกลางมีเหลือ)
+    //                         → Destroy การ์ดจากกระดาน + จั่วใบใหม่
+    // =============================================================================
     public void PromptReserveCard(CardDisplay card)
     {
         if (BlockActionDuringQuiz()) return;
@@ -250,6 +268,16 @@ public partial class GameController
 
     // ───────── Board setup ─────────
 
+    // =============================================================================
+    // PopulateBoard — เริ่มต้นกระดานเกมใหม่เอี่ยม (4 ใบต่อ Tier)
+    // เรียกตอน Awake เพื่อให้เห็นการ์ดทันทีที่นำเข้าเกม
+    // DrawNewCard — จั่วการ์ดออกจากกอง (1 ใบ) หลังซื้อ/จอง
+    //
+    // ระบบ Deterministic Seed (DrawNewCard):
+    //   seed = usedCardIds.Count * 1000 + tier * 97 + totalTurnCount
+    //   ทุกเครื่องใช้ seed เดียวกัน → จั่วการ์ดใบเดียวกันเสมอ
+    //   usedCardIds ถูก sync ผ่าน BoardState snapshot = ทุกเครื่องตรงกัน
+    // =============================================================================
     void PopulateBoard()
     {
         ClearContainer(tier3Container);
