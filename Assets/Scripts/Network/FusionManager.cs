@@ -564,31 +564,11 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         _playerCharacters.Remove(player.PlayerId);
         NotifyPlayerNamesUpdated();
 
-        // [FIX] ถ้าเกมเริ่มไปแล้วและมีคนออกกลางเกม → พาทุกคนกลับ MainMenu แทนการค้าง
-        if (IsGameInProgress)
-        {
-            GameLog.Log("[Fusion] Player left mid-game → kicking all players back to MainMenu.");
-            StartCoroutine(KickAllToMainMenuCoroutine());
-            return;
-        }
-
+        // [Shared Mode] คนหลุดกลางเกม → ไม่เตะทุกคนกลับเมนูแล้ว ปล่อยให้ "บอทเล่นแทน"
+        //   NotifyActivePlayersChanged → HandleFusionActivePlayersChanged → UpdateDisconnectedPlayerBotStatus
+        //   (mark seat เป็นบอท) + ScheduleBotTurnIfNeeded (authority รับช่วงรันบอท)
         RefreshPlayerList(runner);
         NotifyActivePlayersChanged();
-    }
-
-    private IEnumerator KickAllToMainMenuCoroutine()
-    {
-        // รอ 1 frame เพื่อให้ event อื่นๆ ทำงานเสร็จก่อน
-        yield return null;
-        IsGameInProgress = false;
-        PlayerPrefs.DeleteKey("GameMode");
-        PlayerPrefs.DeleteKey("MatchmakingRoomCode");
-        PlayerPrefs.Save();
-
-        // รอให้ Runner ปิดและล้างข้อมูลเรียบร้อยก่อนย้าย Scene เพื่อป้องกัน Error (too many commands in package) จากข้อมูลที่ค้าง
-        yield return ResetRunnerCoroutine();
-
-        UnityEngine.SceneManagement.SceneManager.LoadScene("MainMenu 1");
     }
 
     private void RefreshPlayerList(NetworkRunner runner)
