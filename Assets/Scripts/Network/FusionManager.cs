@@ -63,6 +63,9 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     private NetworkRunner _runner;
     private NetworkSceneManagerDefault _sceneManager;
     private readonly Dictionary<int, string> _playerNames = new Dictionary<int, string>();
+    // [Shared Mode · Step 5] Stable seat map: index = seat, value = PlayerId (เรียงตามลำดับเข้าห้อง = id จากน้อยไปมาก)
+    //   ตรึงครั้งเดียว — "ไม่ลบ" เมื่อมีคนออก เพื่อให้ seat ของคนที่เหลือคงที่ (กันบั๊ก seat เลื่อนสวมรอยคนที่ออก)
+    private readonly List<int> _seatOrder = new List<int>();
     private bool _hasPendingQuizStart;
     private int _pendingQuizStartIndex = -1;
 
@@ -122,18 +125,91 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         }
     }
 
-    public bool IsMasterClient => _runner != null && _runner.IsServer;
+    // [Shared Mode · Step 2] authority = ผู้เล่น id ต่ำสุด (ใน Host mode = host เดิม → behavior ไม่เปลี่ยน)
+    public bool IsMasterClient => _runner != null && _runner.IsRunning && _runner.LocalPlayer == AuthorityPlayer;
     public NetworkRunner Runner => _runner;
     public int ActivePlayerCount => _runner == null ? 0 : _runner.ActivePlayers.Count();
     // ชื่อห้อง/เซสชัน Photon — เท่ากันทุกเครื่องในแมตช์เดียวกัน (ใช้ทำ seed สุ่มกระดานให้ตรงกันข้ามเครื่อง)
     public string CurrentSessionName => _runner != null && _runner.SessionInfo != null ? _runner.SessionInfo.Name : null;
 
+    // ─── [Shared Mode Migration · Step 1] Authority helpers ───────────────────
+    // นิยาม "Authority" = ผู้เล่นที่ PlayerId ต่ำสุดในห้อง (= seat 0 = Photon shared master client โดยพฤตินัย)
+    // ใช้แทนแนวคิด Host/IsServer ที่ใช้ไม่ได้ใน Shared Mode (ซึ่งไม่มี server peer)
+    // ทุกเครื่องคำนวณค่าเดียวกันเสมอ → ได้ host-migration อัตโนมัติ (authority ออก → คนถัดไป id ต่ำสุดรับช่วงเอง)
+    //
+    // หมายเหตุ: ยังไม่มีใครเรียกใน Step 1 — เพิ่มไว้เฉยๆ ไม่กระทบ behavior เดิม (จะเอาไปใช้ใน Step 2)
+
+    // PlayerRef ของ authority ปัจจุบัน (default ถ้ายังไม่มีผู้เล่น/runner ยังไม่พร้อม)
+    public PlayerRef AuthorityPlayer
+    {
+        get
+        {
+            if (_runner == null)
+            {
+                return default;
+            }
+
+            PlayerRef authority = default;
+            bool found = false;
+            foreach (var player in _runner.ActivePlayers)
+            {
+                if (!found || player.PlayerId < authority.PlayerId)
+                {
+                    authority = player;
+                    found = true;
+                }
+            }
+
+            return authority;
+        }
+    }
+
+    // local player เป็น authority ของห้องนี้ไหม (เวอร์ชันรับ runner จาก callback)
+    private bool IsLocalAuthority(NetworkRunner runner)
+    {
+        if (runner == null || !runner.IsRunning)
+        {
+            return false;
+        }
+
+        PlayerRef authority = default;
+        bool found = false;
+        foreach (var player in runner.ActivePlayers)
+        {
+            if (!found || player.PlayerId < authority.PlayerId)
+            {
+                authority = player;
+                found = true;
+            }
+        }
+
+        return found && runner.LocalPlayer == authority;
+    }
+
+    // ส่งข้อมูลไปยัง authority ของห้อง (แทน SendReliableDataToServer ที่ใช้ไม่ได้ใน Shared Mode)
+    // ถ้า local เป็น authority เองอยู่แล้ว → ไม่ต้องส่ง (caller ควรจัดการ state ตัวเองโดยตรง)
+    private void SendToAuthority(byte[] payload)
+    {
+        if (_runner == null || payload == null)
+        {
+            return;
+        }
+
+        PlayerRef authority = AuthorityPlayer;
+        if (authority == _runner.LocalPlayer)
+        {
+            return;
+        }
+
+        _runner.SendReliableDataToPlayer(authority, default, payload);
+    }
+
     // =============================================================================
     // StartMatchedGame — เริ่มเกมหลัง Matchmaking
     // -----------------------------------------------------------------------
-    // isHost=true  → เป็น Host สร้างห้องผ่าน Supabase Edge Function แล้ว
-    // isHost=false → เป็น Client รอให้ Host สร้างห้องก่อน (initial delay 4 วิ + retry 24 ครั้ง)
-    // ถ้าไม่ระบุ isHost → ใช้ AutoHostOrClient (เสี่ยง race condition)
+    // [Shared Mode · Step 3] ทุกเครื่องเข้าด้วย GameMode.Shared + SessionName เดียวกัน
+    //   Photon สร้างห้องให้คนแรก แล้วคนถัดมา join ห้องเดิมอัตโนมัติ → ไม่มี host/client race
+    //   พารามิเตอร์ isHost เก็บไว้เพื่อความเข้ากันได้กับ caller เดิม แต่ไม่ใช้แล้ว (Shared ไม่มี host election)
     // =============================================================================
     public void StartMatchedGame(string roomCode, string sceneName = null, Action<string> onFail = null, bool? isHost = null)
     {
@@ -141,10 +217,10 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         PlayerPrefs.SetString("GameMode", "Online");
         PlayerPrefs.Save();
 
-        // ถ้าไม่มี sceneName (Lobby manual) ให้ใช้ Host mode ตรงๆ เพื่อรอคนเข้าร่วม
+        // ถ้าไม่มี sceneName (Lobby manual) → เข้าห้อง Shared ค้างไว้ในฉาก lobby เพื่อรอคนเข้าร่วม
         if (string.IsNullOrEmpty(sceneName))
         {
-            StartGameCoroutine(GameMode.Host, roomCode, null);
+            StartGameCoroutine(GameMode.Shared, roomCode, null);
             return;
         }
 
@@ -156,31 +232,13 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     {
         const int maxRetries = 24;
         const float retryDelaySeconds = 2.5f;
-        // [FIX] Client รอ Host มีเวลาสร้างห้องก่อน แต่ลดลงเหลือ 4 วิ เพราะ retry loop รับช่วงต่อได้อยู่แล้ว
-        // (รอ 4 วิ + 24 ครั้ง × 2.5 วิ ≈ งบเวลารวม ~64 วิ — ครอบคลุมการสร้างห้อง Photon บน emulator ที่อืด)
-        // ลองเข้าเร็วขึ้น = ถ้า Host สร้างห้องเสร็จไว ก็ต่อติดเร็ว ไม่ต้องรอครบ 8 วิทุกครั้ง
-        const float clientInitialDelaySeconds = 4f;
         string lastFailReason = "Unknown";
-        
-        GameMode targetMode = GameMode.AutoHostOrClient;
-        if (isHost.HasValue)
-        {
-            targetMode = isHost.Value ? GameMode.Host : GameMode.Client;
-            GameLog.Log($"[Fusion] Deterministic Host Election: {targetMode}");
-        }
-        else
-        {
-            // ไม่มีข้อมูล host ที่แน่นอน → ใช้ AutoHostOrClient ซึ่งเสี่ยง race (สองเครื่องสร้างห้องพร้อมกัน)
-            // ใช้ LogWarning เพื่อให้เห็นใน logcat แม้ใน release build (fallback = สัญญาณว่า players list/format ฝั่ง server มีปัญหา)
-            Debug.LogWarning("[Fusion] No deterministic host info — using AutoHostOrClient (race-prone). Check server players list / UUID format.");
-        }
 
-        // [FIX KEY] ถ้าเป็น Client → รอให้ Host สร้างห้องเสร็จก่อน ก่อนจะพยายามเข้าครั้งแรก
-        if (targetMode == GameMode.Client)
-        {
-            GameLog.Log($"[Fusion] Client waiting {clientInitialDelaySeconds}s for Host to create room...");
-            yield return new WaitForSeconds(clientInitialDelaySeconds);
-        }
+        // [Shared Mode · Step 3] ไม่มี host election แล้ว — ทุกเครื่องเข้าด้วย GameMode.Shared
+        //   คนแรกที่เข้าจะสร้างห้อง คนถัดมา join ห้องเดิมให้เอง (Photon จัดการ) → ไม่ต้องรอ/ไม่ race
+        //   _ = isHost; // เก็บพารามิเตอร์ไว้เพื่อ compat แต่ไม่ใช้
+        _ = isHost;
+        GameMode targetMode = GameMode.Shared;
 
         for (int attempt = 0; attempt <= maxRetries; attempt++)
         {
@@ -196,7 +254,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
 
             if (result == true)
             {
-                GameLog.Log($"[Fusion] Auto-Match OK: room={roomCode}, isServer={_runner?.IsServer}");
+                GameLog.Log($"[Fusion] Auto-Match OK: room={roomCode}, isMaster={IsMasterClient}");
                 yield break;
             }
 
@@ -210,7 +268,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
 
     public void LoadGameScene()
     {
-        if (_runner != null && _runner.IsServer)
+        if (_runner != null && IsLocalAuthority(_runner))
         {
             string sceneToLoad = string.IsNullOrEmpty(gameSceneName) ? "SampleScene" : gameSceneName;
             _runner.LoadScene(ResolveSceneRef(sceneToLoad), UnityEngine.SceneManagement.LoadSceneMode.Single);
@@ -223,7 +281,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     // host-only helper สำหรับอัปเดตสถานะห้องใน Supabase (waiting → playing → finished)
     public void SetRoomStatus(string status, int? playerCount = null)
     {
-        if (_runner == null || !_runner.IsServer) return;
+        if (_runner == null || !IsLocalAuthority(_runner)) return;
         string roomCode = _runner.SessionInfo?.Name;
         if (string.IsNullOrEmpty(roomCode)) return;
         if (SupabaseManager.Instance == null || !SupabaseManager.Instance.IsInitialized) return;
@@ -266,18 +324,21 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     }
 
     // ── Public entry: Coroutine version พร้อม callback ผลลัพธ์ (ใช้ใน JoinRoomWithRetryCoroutine) ──
-    public Coroutine StartGameCoroutineWithResult(GameMode mode, string roomName, Action<bool> onComplete, string sceneToLoad = null)
+    public Coroutine StartGameCoroutineWithResult(GameMode mode, string roomName, Action<bool> onComplete, string sceneToLoad = null, bool allowSessionCreation = true)
     {
         PlayerPrefs.SetString("GameMode", "Online");
         PlayerPrefs.Save();
-        return StartCoroutine(StartGameCoroutineInternal(mode, roomName, sceneToLoad, onComplete));
+        return StartCoroutine(StartGameCoroutineInternal(mode, roomName, sceneToLoad, onComplete, null, allowSessionCreation));
     }
 
 
     // ──────────────────────────────────────────────────────────────────
     //  Core: ทุก network join/create ผ่านที่นี่ — 100% Main Thread
     // ──────────────────────────────────────────────────────────────────
-    private IEnumerator StartGameCoroutineInternal(GameMode mode, string roomName, string sceneToLoad, Action<bool> onComplete, Action<string> onFailReason = null)
+    // allowSessionCreation: true = สร้างห้องได้ถ้ายังไม่มี (Create/Matchmaking)
+    //                       false = ต้องมีห้องอยู่จริงเท่านั้น (Join) — ถ้าไม่มีจะ error แทนการสร้างห้องเดี่ยว
+    //   [Shared Mode · Step 6] กันบั๊ก "ต่างคนต่างสร้างห้องตัวเอง" เมื่อรหัสห้อง/region ไม่ตรง
+    private IEnumerator StartGameCoroutineInternal(GameMode mode, string roomName, string sceneToLoad, Action<bool> onComplete, Action<string> onFailReason = null, bool allowSessionCreation = true)
     {
         // บังคับ region ให้ตรงกันทุกเครื่องก่อนต่อ Photon (กัน PC กับมือถือไปอยู่คนละ region แล้วหาห้องกันไม่เจอ)
         ApplyFixedPhotonRegion();
@@ -291,6 +352,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         _runner.AddCallbacks(this);
         _runner.ProvideInput = true;
         _playerNames.Clear();
+        _seatOrder.Clear();
         _hasPendingQuizStart = false;
         _pendingQuizStartIndex = -1;
 
@@ -305,13 +367,17 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
             targetScene = SceneRef.FromIndex(UnityEngine.SceneManagement.SceneManager.GetActiveScene().buildIndex);
         }
 
+        GameLog.Log($"[Fusion] StartGame → room='{roomName}', mode={mode}, allowCreate={allowSessionCreation}, region='{(Fusion.Photon.Realtime.PhotonAppSettings.TryGetGlobal(out var ps) && ps.AppSettings != null ? ps.AppSettings.FixedRegion : "?")}'");
+
         // เรียก Fusion StartGame (async) แล้ว poll รอผลลัพธ์บน main thread
         var fusionStartTask = _runner.StartGame(new StartGameArgs()
         {
             GameMode = mode,
             SessionName = roomName,
             Scene = targetScene,
-            SceneManager = _sceneManager
+            SceneManager = _sceneManager,
+            // [Shared Mode · Step 6] Join (allowCreate=false) → ถ้าห้องไม่มีจริงจะ fail ไม่สร้างห้องเดี่ยว
+            EnableClientSessionCreation = allowSessionCreation
         });
 
         // poll ทุก frame จนกว่า task จะเสร็จ (max 25 วินาที)
@@ -359,7 +425,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         {
             GameLog.Log($"[Fusion] Started session successfully: {roomName} (Mode: {mode})");
 
-            if (_runner != null && _runner.IsServer && SupabaseManager.Instance != null && SupabaseManager.Instance.IsInitialized)
+            if (_runner != null && IsLocalAuthority(_runner) && SupabaseManager.Instance != null && SupabaseManager.Instance.IsInitialized)
             {
                 _ = PlayerDataService.CreateRoomAsync(roomName, roomName, 1);
             }
@@ -426,7 +492,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
 
         RegisterPlayerName(runner.LocalPlayer.PlayerId, GetLocalPlayerName(runner.LocalPlayer.PlayerId));
 
-        if (runner.IsServer && player != runner.LocalPlayer)
+        if (IsLocalAuthority(runner) && player != runner.LocalPlayer)
         {
             SendKnownPlayerNamesToPlayer(player);
         }
@@ -436,15 +502,43 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
             LobbyUI.Instance.SetViewState(true);
         }
 
-        if (player == runner.LocalPlayer && !runner.IsServer)
+        if (player == runner.LocalPlayer && !IsLocalAuthority(runner))
         {
             SendLocalPlayerNameToServer();
         }
 
+        RefreshSeatOrder(runner); // ตรึง seat ของผู้เล่นใหม่ (ก่อน refresh UI)
         RefreshPlayerList(runner);
         NotifyActivePlayersChanged();
         // ไม่ sync player_count ขึ้น DB ทุกครั้ง — รอ snapshot ตอน LoadGameScene
         // (lobby UI อ่านจาก Fusion ตรงอยู่แล้ว, DB เก็บไว้เป็น "บันทึกแมตช์")
+    }
+
+    // [Shared Mode · Step 5/6] เพิ่ม PlayerId ใหม่เข้า seat map โดย "ไม่ลบ" ของเดิม แล้ว Sort ตาม id เสมอ
+    //   → seat = อันดับ PlayerId (global) เหมือนกันทุกเครื่อง (กัน callback มาคนละจังหวะแล้ว seat ไม่ตรงกัน)
+    //   → คงที่ตลอดแมตช์ แม้มีคนออกกลางเกม (id คนออกยังอยู่ใน list → คนที่เหลือไม่เลื่อน)
+    private void RefreshSeatOrder(NetworkRunner runner)
+    {
+        if (runner == null)
+        {
+            return;
+        }
+
+        bool added = false;
+        foreach (var p in runner.ActivePlayers)
+        {
+            if (!_seatOrder.Contains(p.PlayerId))
+            {
+                _seatOrder.Add(p.PlayerId);
+                added = true;
+            }
+        }
+
+        // เรียงตาม PlayerId เสมอ → seat เท่ากันทุกเครื่อง (ids เพิ่มขึ้นเรื่อยๆ → ของเดิมไม่สลับตำแหน่ง)
+        if (added)
+        {
+            _seatOrder.Sort();
+        }
     }
 
     public void OnPlayerLeft(NetworkRunner runner, PlayerRef player)
@@ -479,7 +573,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
 
         if (LobbyUI.Instance != null)
         {
-            LobbyUI.Instance.UpdatePlayerList(list, runner.ActivePlayers.Count(), runner.IsServer);
+            LobbyUI.Instance.UpdatePlayerList(list, runner.ActivePlayers.Count(), IsLocalAuthority(runner));
         }
 
     }
@@ -555,7 +649,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
             string playerName = string.Join(PlayerNameSeparator.ToString(), parts.Skip(2));
             RegisterPlayerName(playerId, playerName);
 
-            if (runner.IsServer)
+            if (IsLocalAuthority(runner))
             {
                 BroadcastPlayerName(player, playerId, playerName);
             }
@@ -578,7 +672,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
                 return;
             }
 
-            if (runner.IsServer)
+            if (IsLocalAuthority(runner))
             {
                 TurnStateReceived?.Invoke(currentPlayerIndex, currentRound, totalTurnCount, currentTurnDisplay);
 
@@ -602,7 +696,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
 
         if (string.Equals(parts[0], QuizStartMessageType, StringComparison.Ordinal))
         {
-            if (runner.IsServer || parts.Length < 2 || !int.TryParse(parts[1], out int questionIndex))
+            if (IsLocalAuthority(runner) || parts.Length < 2 || !int.TryParse(parts[1], out int questionIndex))
             {
                 return;
             }
@@ -616,7 +710,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         if (string.Equals(parts[0], QuizRequestMessageType, StringComparison.Ordinal))
         {
             // เฉพาะ host เท่านั้นที่ตอบสนองคำขอเริ่มควิซ (client เป็นคนส่งมา)
-            if (runner.IsServer)
+            if (IsLocalAuthority(runner))
             {
                 QuizStartRequested?.Invoke();
             }
@@ -628,7 +722,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         {
             // เฉพาะ host เท่านั้นที่ตอบสนองคำขอ full state (late-joiner เป็นคนส่งมา)
             // ส่ง playerId ของคนขอไปด้วย เพื่อให้ host ตอบกลับเฉพาะคนนั้น (ไม่รีเซ็ต timer คนอื่น)
-            if (runner.IsServer)
+            if (IsLocalAuthority(runner))
             {
                 FullStateRequested?.Invoke(player.PlayerId);
             }
@@ -638,7 +732,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
 
         if (string.Equals(parts[0], QuizAnswerMessageType, StringComparison.Ordinal))
         {
-            if (!runner.IsServer || parts.Length < 4 || !int.TryParse(parts[1], out int answerPlayerIndex))
+            if (!IsLocalAuthority(runner) || parts.Length < 4 || !int.TryParse(parts[1], out int answerPlayerIndex))
             {
                 return;
             }
@@ -661,7 +755,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
 
         if (string.Equals(parts[0], QuizResultMessageType, StringComparison.Ordinal))
         {
-            if (runner.IsServer || parts.Length < 2)
+            if (IsLocalAuthority(runner) || parts.Length < 2)
             {
                 return;
             }
@@ -683,7 +777,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
             }
 
             EconomyStateSnapshot snapshot = DecodeEconomyState(parts[1], parts[2]);
-            if (runner.IsServer)
+            if (IsLocalAuthority(runner))
             {
                 EconomyStateReceived?.Invoke(snapshot);
 
@@ -722,7 +816,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
 
             BoardStateReceived?.Invoke(boardSnapshot);
 
-            if (runner.IsServer)
+            if (IsLocalAuthority(runner))
             {
                 foreach (var activePlayer in runner.ActivePlayers)
                 {
@@ -753,7 +847,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
 
         RegisterPlayerName(legacyPlayerId, legacyPlayerName);
 
-        if (runner.IsServer)
+        if (IsLocalAuthority(runner))
         {
             BroadcastPlayerName(player, legacyPlayerId, legacyPlayerName);
         }
@@ -858,6 +952,8 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
             : null;
     }
 
+    // [Shared Mode · Step 5] seat อิงจาก stable map (_seatOrder) ไม่ใช่รายชื่อ active สดๆ
+    //   → seat ของ local คงที่ตลอดแมตช์ แม้ผู้เล่น id ต่ำกว่าออกไป (เดิมจะเลื่อนไปสวม seat คนที่ออก)
     public int GetLocalPlayerSeatIndex()
     {
         if (_runner == null)
@@ -865,27 +961,46 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
             return 0;
         }
 
-        var orderedPlayers = GetOrderedActivePlayers();
-        for (int i = 0; i < orderedPlayers.Count; i++)
-        {
-            if (orderedPlayers[i] == _runner.LocalPlayer)
-            {
-                return i;
-            }
-        }
-
-        return 0;
+        int seat = _seatOrder.IndexOf(_runner.LocalPlayer.PlayerId);
+        return seat >= 0 ? seat : 0;
     }
 
     public string GetPlayerNameBySeat(int seatIndex)
     {
-        var orderedPlayers = GetOrderedActivePlayers();
-        if (seatIndex < 0 || seatIndex >= orderedPlayers.Count)
+        if (seatIndex < 0 || seatIndex >= _seatOrder.Count)
         {
             return null;
         }
 
-        return GetDisplayNameForPlayer(orderedPlayers[seatIndex]);
+        // คืน null ถ้ายังไม่รู้ชื่อ (เช่น คนออกไปแล้ว) → caller จะคงชื่อเดิมบน UI ไว้ ไม่เขียนทับเป็น "Player X"
+        return _playerNames.TryGetValue(_seatOrder[seatIndex], out string name) && !string.IsNullOrWhiteSpace(name)
+            ? name
+            : null;
+    }
+
+    // PlayerId ที่ถูก assign ให้ seat นี้ (-1 ถ้า seat เกินช่วง) — ใช้เช็คสถานะการเชื่อมต่อของ seat
+    public int GetPlayerIdBySeat(int seatIndex)
+    {
+        return (seatIndex >= 0 && seatIndex < _seatOrder.Count) ? _seatOrder[seatIndex] : -1;
+    }
+
+    // playerId นี้ยังเชื่อมต่ออยู่ในห้องไหม
+    public bool IsPlayerConnected(int playerId)
+    {
+        if (_runner == null || playerId < 0)
+        {
+            return false;
+        }
+
+        foreach (var p in _runner.ActivePlayers)
+        {
+            if (p.PlayerId == playerId)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public void SendTurnState(int currentPlayerIndex, int currentRound, int totalTurnCount, int currentTurnDisplay)
@@ -896,7 +1011,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         }
 
         byte[] payload = EncodeTurnStatePayload(currentPlayerIndex, currentRound, totalTurnCount, currentTurnDisplay);
-        if (_runner.IsServer)
+        if (IsLocalAuthority(_runner))
         {
             foreach (var activePlayer in _runner.ActivePlayers)
             {
@@ -911,7 +1026,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
             return;
         }
 
-        _runner.SendReliableDataToServer(default, payload);
+        SendToAuthority(payload);
     }
 
     public void SendBoardState(BoardStateSnapshot snapshot)
@@ -923,7 +1038,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
 
         byte[] payload = BuildBoardPayload(snapshot);
 
-        if (_runner.IsServer)
+        if (IsLocalAuthority(_runner))
         {
             foreach (var activePlayer in _runner.ActivePlayers)
             {
@@ -938,7 +1053,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
             return;
         }
 
-        _runner.SendReliableDataToServer(default, payload);
+        SendToAuthority(payload);
     }
 
     // client ขอให้ host เริ่มควิซ (เมื่อ client เป็นคนจบเทิร์นที่ถึงรอบควิซ)
@@ -951,32 +1066,32 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
 
         byte[] payload = Encoding.UTF8.GetBytes(QuizRequestMessageType);
 
-        if (_runner.IsServer)
+        if (IsLocalAuthority(_runner))
         {
             // host เรียกเองได้โดยตรง ไม่ต้องส่งผ่าน network
             QuizStartRequested?.Invoke();
             return;
         }
 
-        _runner.SendReliableDataToServer(default, payload);
+        SendToAuthority(payload);
     }
 
     // client (late-joiner) ขอ full state ปัจจุบันจาก host
     public void RequestFullState()
     {
-        if (_runner == null || _runner.IsServer)
+        if (_runner == null || IsLocalAuthority(_runner))
         {
             return; // host มี state ครบอยู่แล้ว ไม่ต้องขอ
         }
 
         byte[] payload = Encoding.UTF8.GetBytes(StateRequestMessageType);
-        _runner.SendReliableDataToServer(default, payload);
+        SendToAuthority(payload);
     }
 
     // host ตอบกลับ full state เฉพาะ player ที่ขอ (ส่งเจาะจง ไม่ broadcast — กันรีเซ็ต timer คนที่กำลังเล่นอยู่)
     public void SendBoardStateToPlayer(int playerId, BoardStateSnapshot snapshot)
     {
-        if (_runner == null || !_runner.IsServer || !TryGetPlayerRef(playerId, out PlayerRef target))
+        if (_runner == null || !IsLocalAuthority(_runner) || !TryGetPlayerRef(playerId, out PlayerRef target))
         {
             return;
         }
@@ -986,7 +1101,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
 
     public void SendEconomyStateToPlayer(int playerId, EconomyStateSnapshot snapshot)
     {
-        if (_runner == null || !_runner.IsServer || !TryGetPlayerRef(playerId, out PlayerRef target))
+        if (_runner == null || !IsLocalAuthority(_runner) || !TryGetPlayerRef(playerId, out PlayerRef target))
         {
             return;
         }
@@ -996,7 +1111,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
 
     public void SendTurnStateToPlayer(int playerId, int currentPlayerIndex, int currentRound, int totalTurnCount, int currentTurnDisplay)
     {
-        if (_runner == null || !_runner.IsServer || !TryGetPlayerRef(playerId, out PlayerRef target))
+        if (_runner == null || !IsLocalAuthority(_runner) || !TryGetPlayerRef(playerId, out PlayerRef target))
         {
             return;
         }
@@ -1044,7 +1159,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
 
     public void SendQuizStart(int questionIndex)
     {
-        if (_runner == null || !_runner.IsServer)
+        if (_runner == null || !IsLocalAuthority(_runner))
         {
             return;
         }
@@ -1063,7 +1178,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
 
     public void SendQuizAnswer(int playerIndex, bool isCorrect, float timeTaken)
     {
-        if (_runner == null || _runner.IsServer)
+        if (_runner == null || IsLocalAuthority(_runner))
         {
             return;
         }
@@ -1072,12 +1187,12 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         string timeTakenText = timeTaken.ToString("0.000", CultureInfo.InvariantCulture);
         byte[] payload = Encoding.UTF8.GetBytes(
             $"{QuizAnswerMessageType}{PlayerNameSeparator}{playerIndex}{PlayerNameSeparator}{correctnessFlag}{PlayerNameSeparator}{timeTakenText}");
-        _runner.SendReliableDataToServer(default, payload);
+        SendToAuthority(payload);
     }
 
     public void SendQuizResults(IEnumerable<QuizAnswerSnapshot> answers, IEnumerable<int> rewardGemIndices)
     {
-        if (_runner == null || !_runner.IsServer)
+        if (_runner == null || !IsLocalAuthority(_runner))
         {
             return;
         }
@@ -1107,7 +1222,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
 
         byte[] payload = BuildEconomyPayload(snapshot);
 
-        if (_runner.IsServer)
+        if (IsLocalAuthority(_runner))
         {
             foreach (var activePlayer in _runner.ActivePlayers)
             {
@@ -1122,7 +1237,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
             return;
         }
 
-        _runner.SendReliableDataToServer(default, payload);
+        SendToAuthority(payload);
     }
 
     public bool TryConsumePendingQuizStart(out int questionIndex)
@@ -1148,12 +1263,12 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
 
         string localName = GetLocalPlayerName(_runner.LocalPlayer.PlayerId);
         byte[] payload = EncodePlayerNamePayload(_runner.LocalPlayer.PlayerId, localName);
-        _runner.SendReliableDataToServer(default, payload);
+        SendToAuthority(payload);
     }
 
     private void SendKnownPlayerNamesToPlayer(PlayerRef targetPlayer)
     {
-        if (_runner == null || !_runner.IsServer)
+        if (_runner == null || !IsLocalAuthority(_runner))
         {
             return;
         }
@@ -1167,7 +1282,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
 
     private void BroadcastPlayerName(PlayerRef sourcePlayer, int playerId, string playerName)
     {
-        if (_runner == null || !_runner.IsServer)
+        if (_runner == null || !IsLocalAuthority(_runner))
         {
             return;
         }
@@ -1220,28 +1335,6 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     {
         return Encoding.UTF8.GetBytes(
             $"{TurnStateMessageType}{PlayerNameSeparator}{currentPlayerIndex}{PlayerNameSeparator}{currentRound}{PlayerNameSeparator}{totalTurnCount}{PlayerNameSeparator}{currentTurnDisplay}");
-    }
-
-    private List<PlayerRef> GetOrderedActivePlayers()
-    {
-        if (_runner == null)
-        {
-            return new List<PlayerRef>();
-        }
-
-        return _runner.ActivePlayers
-            .OrderBy(p => p.PlayerId)
-            .ToList();
-    }
-
-    private string GetDisplayNameForPlayer(PlayerRef player)
-    {
-        if (_playerNames.TryGetValue(player.PlayerId, out string playerName) && !string.IsNullOrWhiteSpace(playerName))
-        {
-            return playerName;
-        }
-
-        return "Player " + player.PlayerId;
     }
 
     private static bool TryParseBooleanFlag(string value, out bool result)

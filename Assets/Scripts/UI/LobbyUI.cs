@@ -55,11 +55,12 @@ public class LobbyUI : MonoBehaviour
         
         if (startButton != null) startButton.SetActive(false);
 
-        GameLog.Log($"[Lobby] กำลังสร้างห้องในโหมด Host: {rName}");
+        GameLog.Log($"[Lobby] กำลังสร้าง/เข้าห้อง Shared Mode: {rName}");
         if (FusionManager.Instance != null)
         {
+            // [Shared Mode · Step 3] เข้าด้วย GameMode.Shared — คนแรกสร้างห้อง คนถัดมา join ห้องเดิมเอง
             // [FIX-ANDROID] ใช้ Coroutine version (ไม่ใช้ async) เพื่อรับประกัน Main Thread
-            FusionManager.Instance.StartGameCoroutine(Fusion.GameMode.Host, rName);
+            FusionManager.Instance.StartGameCoroutine(Fusion.GameMode.Shared, rName);
         }
     }
 
@@ -102,9 +103,11 @@ public class LobbyUI : MonoBehaviour
             // ใช้ callback เพื่อรับผลลัพธ์ว่าเข้าห้องสำเร็จหรือไม่
             bool? joinResult = null;
             yield return FusionManager.Instance.StartGameCoroutineWithResult(
-                Fusion.GameMode.Client,
+                Fusion.GameMode.Shared,
                 rName,
-                ok => joinResult = ok
+                ok => joinResult = ok,
+                sceneToLoad: null,
+                allowSessionCreation: false // [Shared Mode] Join ต้องเจอห้องจริง — ไม่งั้น fail (ไม่สร้างห้องเดี่ยว)
             );
 
             // รอจนกว่าจะได้ผลลัพธ์

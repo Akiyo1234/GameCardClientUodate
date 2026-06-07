@@ -110,6 +110,12 @@ public partial class GameController
             ApplyNetworkPlayerNamesToUi();
             UpdateTurnVisuals();
 
+            // [Shared Mode · Step 6] seat อาจเพิ่งครบ/เพิ่งรู้ค่าหลังเกมเริ่ม (ตอน panel layout รันครั้งแรก
+            //   _seatOrder ยังไม่ครบ → localSeat ผิด → panel ไม่สลับ). สั่งจัด panel ใหม่ด้วย localSeat ล่าสุด
+            //   ปลอดภัย: ใช้ captured layout เดิม (pristine) แค่หมุนใหม่ ไม่รีเซ็ต turn order
+            if (panelLayoutCoroutine != null) StopCoroutine(panelLayoutCoroutine);
+            panelLayoutCoroutine = StartCoroutine(ConfigureOnlinePlayerPanelLayoutDeferred());
+
             if (ShouldWaitForOnlineOpponent())
             {
                 ShowWarning("Waiting for opponent...");
@@ -127,42 +133,28 @@ public partial class GameController
     private void UpdateDisconnectedPlayerBotStatus()
     {
         if (FusionManager.Instance == null || players == null) return;
+        if (FusionManager.Instance.Runner == null) return;
 
-        var activePlayers = FusionManager.Instance.Runner?.ActivePlayers;
-        if (activePlayers == null) return;
-
-        // สร้างชุดของ seat index ที่ยังเชื่อมอยู่
-        var connectedSeats = new System.Collections.Generic.HashSet<int>();
+        // [Shared Mode · Step 5] เช็คการเชื่อมต่อรายตาม "stable seat map" (seat→PlayerId ตรึงไว้)
+        //   ไม่ map ใหม่ตามรายชื่อ active สดๆ อีกแล้ว → seat ของคนที่เหลือไม่เลื่อนสวมรอยคนที่ออก
         int seatCount = activePlayerCount;
-        foreach (var player in activePlayers)
-        {
-            int seatIndex = FusionManager.Instance.GetLocalPlayerSeatIndex();
-            // Map PlayerId -> seat index โดยเรียงลำดับ (Ordered)
-            int orderedIdx = 0;
-            foreach (var op in FusionManager.Instance.Runner.ActivePlayers
-                         .OrderBy(p => p.PlayerId))
-            {
-                if (op == player) { connectedSeats.Add(orderedIdx); break; }
-                orderedIdx++;
-            }
-        }
-
         for (int seat = 0; seat < seatCount && seat < players.Length; seat++)
         {
             if (players[seat] == null) continue;
-            bool isConnected = connectedSeats.Contains(seat);
+
+            int seatPlayerId = FusionManager.Instance.GetPlayerIdBySeat(seat);
+            bool isConnected = seatPlayerId >= 0 && FusionManager.Instance.IsPlayerConnected(seatPlayerId);
             bool wasBot = players[seat].isBot;
 
             if (!isConnected && !wasBot)
             {
-                // ออกไป — เปลี่ยนเป็น Bot ชั่วคราว
+                // ออกไป — เปลี่ยนเป็น Bot ชั่วคราว (เทิร์นจะถูกข้ามด้วย timer ForceEndTurn)
                 players[seat].isBot = true;
                 GameLog.Log($"[GameController] Seat {seat} หลุดเชื่อมต่อ → เปลี่ยนเป็น Bot ชั่วคราว");
             }
-            else if (isConnected && wasBot && seat < seatCount)
+            else if (isConnected && wasBot)
             {
-                // ต่อกลับมา — ถ้า seat นี้ในอดีตเคยเป็นคนจริง (ไม่ใช่ Bot ดั้งเดิม)
-                // เขาต่อกลับมา — reset isBot = false
+                // ต่อกลับมา — คืนตัวเป็นผู้เล่นจริง + ดึง full state ล่าสุด
                 players[seat].isBot = false;
                 GameLog.Log($"[GameController] Seat {seat} ต่อกลับมา → คืนตัวเป็นผู้เล่นจริง");
                 FusionManager.Instance.RequestFullState();
@@ -649,6 +641,11 @@ public partial class GameController
         int localSeat = GetResolvedLocalPlayerSlotIndex();
         int layoutCount = Mathf.Min(activePlayerCount, Mathf.Min(players.Length, capturedPlayerPanelLayouts.Length));
 
+        // หา "ช่องบ้าน" = ตำแหน่งซ้ายล่างสุด → ยกให้เจ้าของเครื่อง (local) เสมอ
+        // (ไม่ผูกกับว่า players[0] วางตรงไหนในซีน — โค้ดเลือกช่องซ้ายล่างเอง)
+        int homeSlot = GetBottomLeftLayoutIndex(layoutCount);
+        GameLog.Log($"[GameController] Panel layout: localSeat={localSeat}, homeSlot(ซ้ายล่าง)={homeSlot}, layoutCount={layoutCount}");
+
         for (int seatIndex = 0; seatIndex < layoutCount; seatIndex++)
         {
             if (players[seatIndex] == null)
@@ -656,9 +653,27 @@ public partial class GameController
                 continue;
             }
 
-            int rotatedLayoutIndex = GetRotatedLayoutIndex(seatIndex, localSeat, layoutCount);
+            int rotatedLayoutIndex = GetRotatedLayoutIndex(seatIndex, localSeat, homeSlot, layoutCount);
             ApplyPlayerPanelLayout(players[seatIndex], capturedPlayerPanelLayouts[rotatedLayoutIndex]);
         }
+    }
+
+    // ช่อง layout ที่อยู่ "ซ้ายล่างสุด" บนจอ — เลือกจากตำแหน่งจริง (x น้อย + y น้อย = ใกล้มุมซ้ายล่าง (0,0) ของจอ Unity)
+    private int GetBottomLeftLayoutIndex(int layoutCount)
+    {
+        int bestIndex = 0;
+        float bestScore = float.MaxValue;
+        for (int i = 0; i < layoutCount && i < capturedPlayerPanelLayouts.Length; i++)
+        {
+            Vector3 pos = capturedPlayerPanelLayouts[i].WorldPosition;
+            float score = pos.x + pos.y; // ยิ่งน้อย = ยิ่งใกล้ซ้ายล่าง
+            if (score < bestScore)
+            {
+                bestScore = score;
+                bestIndex = i;
+            }
+        }
+        return bestIndex;
     }
 
     private void CapturePlayerPanelLayoutsIfNeeded()
@@ -685,23 +700,25 @@ public partial class GameController
                 Pivot = rectTransform.pivot,
                 LocalScale = rectTransform.localScale,
                 LocalRotation = rectTransform.localRotation,
-                SiblingIndex = rectTransform.GetSiblingIndex()
+                SiblingIndex = rectTransform.GetSiblingIndex(),
+                WorldPosition = rectTransform.position
             };
         }
 
         playerPanelLayoutsCaptured = true;
     }
 
-    private static int GetRotatedLayoutIndex(int seatIndex, int localSeatIndex, int layoutCount)
+    // คืน index ของ captured layout ที่ seat นี้ควรไปอยู่
+    //   local seat → homeSlot (ซ้ายล่าง) เสมอ, seat อื่นวนรอบโต๊ะถัดจาก homeSlot ตามลำดับ seat
+    private static int GetRotatedLayoutIndex(int seatIndex, int localSeatIndex, int homeSlot, int layoutCount)
     {
         if (layoutCount <= 0)
         {
             return 0;
         }
 
-        int normalizedSeatIndex = ((seatIndex % layoutCount) + layoutCount) % layoutCount;
-        int normalizedLocalSeatIndex = ((localSeatIndex % layoutCount) + layoutCount) % layoutCount;
-        return (normalizedSeatIndex - normalizedLocalSeatIndex + layoutCount) % layoutCount;
+        int offset = (((seatIndex - localSeatIndex) % layoutCount) + layoutCount) % layoutCount;
+        return ((homeSlot + offset) % layoutCount + layoutCount) % layoutCount;
     }
 
     private static void ApplyPlayerPanelLayout(PlayerUI player, PlayerPanelLayout layout)

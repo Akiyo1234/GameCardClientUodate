@@ -122,6 +122,7 @@ public partial class GameController : MonoBehaviour
         public Vector3 LocalScale;
         public Quaternion LocalRotation;
         public int SiblingIndex;
+        public Vector3 WorldPosition; // ตำแหน่งจริงบนจอ (ใช้หาช่องซ้ายล่างสุดให้เจ้าของเครื่อง)
     }
 
     public bool IsOnlineMatchMode => isOnlineMatchMode;
