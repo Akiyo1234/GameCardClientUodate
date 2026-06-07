@@ -350,7 +350,8 @@ public partial class GameController : MonoBehaviour
             FusionManager.Instance.EconomyStateReceived -= HandleOnlineEconomyStateReceived;
             FusionManager.Instance.BoardStateReceived -= HandleOnlineBoardStateReceived;
             FusionManager.Instance.FullStateRequested -= HandleFullStateRequested;
-            FusionManager.Instance.PlayerCharacterReceived -= ApplyRemoteCharacterPortrait; 
+            FusionManager.Instance.PlayerCharacterReceived -= ApplyRemoteCharacterPortrait;
+            FusionManager.Instance.PlayerFrameReceived -= ApplyRemoteFrameUI;
         }
     }
 
@@ -568,7 +569,12 @@ public partial class GameController : MonoBehaviour
                     }
                     else
                     {
-                        players[i].HideNameFrame();
+                        // ยังไม่มีข้อมูลจาก network → ใช้ default frame ไปก่อน
+                        Sprite defaultFrame = Resources.Load<Sprite>($"Frames/{ShopManager.DEFAULT_FRAME}");
+                        if (defaultFrame != null)
+                            players[i].ApplyNameFrame(defaultFrame, Color.white);
+                        else
+                            players[i].HideNameFrame();
                     }
                 }
                 else

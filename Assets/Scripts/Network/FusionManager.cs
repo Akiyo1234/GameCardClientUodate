@@ -358,6 +358,8 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         _runner.AddCallbacks(this);
         _runner.ProvideInput = true;
         _playerNames.Clear();
+        _playerCharacters.Clear();
+        _playerFrames.Clear();
         _seatOrder.Clear();
         _hasPendingQuizStart = false;
         _pendingQuizStartIndex = -1;

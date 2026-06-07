@@ -75,10 +75,15 @@ public partial class GameController
         if (!hasStartedInitialGameplay)
         {
             SetupPlayers();
+            ReapplyAllKnownAvatarsAndFrames(); // ใส่ข้อมูลที่มีอยู่แล้วทับรูปสุ่ม
             ConfigureBankCoinsByPlayerCount();
             UpdateBankUI();
             UpdateTurnVisuals();
             ApplyNetworkPlayerNamesToUi();
+
+            // สั่ง re-apply อีกรอบหลังรอ network messages มาถึง
+            if (_reapplyProfileCoroutine != null) StopCoroutine(_reapplyProfileCoroutine);
+            _reapplyProfileCoroutine = StartCoroutine(DelayedReapplyProfiles());
 
             if (ShouldWaitForOnlineOpponent())
             {
@@ -284,6 +289,55 @@ public partial class GameController
         }
     }
 
+    // วนลูปทุก seat แล้ว apply avatar+frame จากข้อมูลที่ FusionManager มีอยู่แล้ว
+    // แก้ race condition ที่ SetupPlayers() รันก่อน CHAR/FRAME message มาถึง
+    private void ReapplyAllKnownAvatarsAndFrames()
+    {
+        if (!isOnlineMatchMode || FusionManager.Instance == null || players == null) return;
+
+        for (int seat = 0; seat < activePlayerCount && seat < players.Length; seat++)
+        {
+            if (players[seat] == null || players[seat].isBot) continue;
+
+            // ข้าม local player — SetupPlayers ใส่ถูกต้องอยู่แล้ว
+            if (seat == localPlayerSlotIndex) continue;
+
+            int playerId = FusionManager.Instance.GetPlayerIdBySeat(seat);
+            if (playerId < 0) continue;
+
+            // Avatar
+            if (FusionManager.Instance.TryGetPlayerCharacter(playerId, out int charIndex)
+                && availableCharacters != null && availableCharacters.Length > 0)
+            {
+                int clamped = Mathf.Clamp(charIndex, 0, availableCharacters.Length - 1);
+                if (players[seat].characterPortrait != null && availableCharacters[clamped].portraitSprite != null)
+                {
+                    players[seat].characterPortrait.sprite = availableCharacters[clamped].portraitSprite;
+                }
+            }
+
+            // Frame
+            if (FusionManager.Instance.TryGetPlayerFrame(playerId, out string frameId) && !string.IsNullOrEmpty(frameId))
+            {
+                Sprite sp = Resources.Load<Sprite>($"Frames/{frameId}");
+                if (sp != null)
+                    players[seat].ApplyNameFrame(sp, Color.white);
+                else
+                    players[seat].HideNameFrame();
+            }
+        }
+    }
+
+    // Coroutine ที่รอให้ CHAR/FRAME messages มาถึงแล้ว re-apply อีกรอบ
+    private Coroutine _reapplyProfileCoroutine;
+    private IEnumerator DelayedReapplyProfiles()
+    {
+        // รอ 1.5 วิ ให้ CHAR/FRAME messages เดินทางมาถึงทุกเครื่อง
+        yield return new WaitForSeconds(1.5f);
+        ReapplyAllKnownAvatarsAndFrames();
+        ApplyNetworkPlayerNamesToUi();
+        GameLog.Log("[GameController] Delayed re-apply avatar/frame completed.");
+    }
 
     private string GetOnlinePlayerDisplayNameForSeat(int seatIndex)
     {
@@ -591,8 +645,8 @@ public partial class GameController
 
     private IEnumerator DelayedSyncLocalProfile()
     {
-        // หน่วงเวลาเล็กน้อยเพื่อให้แน่ใจว่าโหลดฉากเสร็จและ Event/RPC ต่างๆ ของ Photon พร้อมใช้งาน
-        yield return new WaitForSeconds(0.5f);
+        // รอให้ Photon พร้อมใช้งาน
+        yield return new WaitForSeconds(1.0f);
         
         if (FusionManager.Instance != null && FusionManager.Instance.Runner != null)
         {
@@ -603,15 +657,18 @@ public partial class GameController
             {
                 FusionManager.Instance.BroadcastLocalCharacter(myCharIndex);
                 FusionManager.Instance.BroadcastLocalFrame(myFrameId);
-                GameLog.Log($"[GameController] Delayed sync: Master broadcasted Character={myCharIndex}, Frame={myFrameId}");
             }
             else
             {
                 FusionManager.Instance.SendLocalCharacterToServer(myCharIndex);
                 FusionManager.Instance.SendLocalFrameToServer(myFrameId);
-                GameLog.Log($"[GameController] Delayed sync: Client sent Character={myCharIndex}, Frame={myFrameId} to Master");
             }
         }
+
+        // รอเพิ่มอีกนิดให้ข้อมูลจากคนอื่นเดินทางมาถึงแล้ว re-apply ทั้งหมด
+        yield return new WaitForSeconds(1.5f);
+        ReapplyAllKnownAvatarsAndFrames();
+        ApplyNetworkPlayerNamesToUi();
     }
 
     private void RebuildReservedAreaIfChanged(PlayerUI player, string[] cardIds)
