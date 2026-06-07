@@ -319,6 +319,38 @@ public static class PlayerDataService
     [System.Serializable] private class UnansweredRow { public string external_id; }
     [System.Serializable] private class UnansweredWrapper { public UnansweredRow[] rows; }
 
+    /// <summary>ตรวจสอบผ่าน Supabase RPC ว่าวันนี้เคยรับรางวัลไปแล้วหรือยัง</summary>
+    public static async Task<bool> HasClaimedDailyQuizTodayAsync()
+    {
+        var sb = SupabaseManager.Instance?.Client;
+        if (sb?.Auth?.CurrentUser == null) return false;
+
+        try
+        {
+            string userId = sb.Auth.CurrentUser.Id;
+            string url = $"{SupabaseConfig.Url}/rest/v1/rpc/has_claimed_daily_quiz_today";
+            using var req = new HttpRequestMessage(HttpMethod.Post, url);
+            req.Headers.TryAddWithoutValidation("apikey", SupabaseConfig.AnonKey);
+            req.Headers.TryAddWithoutValidation("Authorization", $"Bearer {sb.Auth.CurrentSession.AccessToken}");
+            req.Content = new StringContent($"{{\"p_user_id\":\"{userId}\"}}", Encoding.UTF8, "application/json");
+
+            var resp = await _http.SendAsync(req);
+            string body = await resp.Content.ReadAsStringAsync();
+            if (!resp.IsSuccessStatusCode)
+            {
+                Debug.LogWarning($"[PlayerData] has_claimed_daily_quiz_today failed: {body}");
+                return false;
+            }
+
+            return body.Trim().ToLower() == "true";
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning($"[PlayerData] HasClaimedDailyQuizToday error: {e.Message}");
+            return false;
+        }
+    }
+
     /// <summary>สวมกรอบ — server ตรวจ ownership ก่อนสวม</summary>
     public static async Task EquipFrameAsync(string itemId)
     {

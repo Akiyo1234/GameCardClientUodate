@@ -154,6 +154,7 @@ public partial class GameController : MonoBehaviour
             FusionManager.Instance.EconomyStateReceived += HandleOnlineEconomyStateReceived;
             FusionManager.Instance.BoardStateReceived += HandleOnlineBoardStateReceived;
             FusionManager.Instance.FullStateRequested += HandleFullStateRequested;
+            FusionManager.Instance.PlayerCharacterReceived += ApplyRemoteCharacterPortrait; // [NEW]
         }
 
         EnsureBotController();
@@ -244,6 +245,7 @@ public partial class GameController : MonoBehaviour
         // 2. ปิดระบบเน็ตเวิร์ก (ถ้ามี)
         if (FusionManager.Instance != null)
         {
+            FusionManager.Instance.IsGameInProgress = false; // [FIX] Reset status
             FusionManager.Instance.Disconnect();
         }
 
@@ -286,6 +288,12 @@ public partial class GameController : MonoBehaviour
 
         hasStartedInitialGameplay = true;
         ClearWarning();
+
+        // [NEW] แจ้ง FusionManager ว่าเกมเริ่มแล้ว เพื่อให้การไล่ OnPlayerLeft kick ทุกคนกลับ MainMenu
+        if (FusionManager.Instance != null && isOnlineMatchMode)
+        {
+            FusionManager.Instance.IsGameInProgress = true;
+        }
 
         if (isOnlineMatchMode && FusionManager.Instance != null && FusionManager.Instance.IsMasterClient)
         {
@@ -339,6 +347,7 @@ public partial class GameController : MonoBehaviour
             FusionManager.Instance.EconomyStateReceived -= HandleOnlineEconomyStateReceived;
             FusionManager.Instance.BoardStateReceived -= HandleOnlineBoardStateReceived;
             FusionManager.Instance.FullStateRequested -= HandleFullStateRequested;
+            FusionManager.Instance.PlayerCharacterReceived -= ApplyRemoteCharacterPortrait; // [NEW]
         }
     }
 
@@ -496,7 +505,24 @@ public partial class GameController : MonoBehaviour
                     else
                     {
                         finalName = GetOnlinePlayerDisplayNameForSeat(i);
-                        if (remainingChars.Count > 0) {
+                        
+                        // [FIX] เช็คว่าได้รับ characterIndex ของคนนี้จาก FusionManager หรือยัง
+                        bool hasKnownCharacter = false;
+                        if (isOnlineMatchMode && FusionManager.Instance != null && 
+                            FusionManager.Instance.TryGetPlayerCharacterBySeat(i, out int knownCharIndex))
+                        {
+                            int clampedIndex = Mathf.Clamp(knownCharIndex, 0, availableCharacters.Length - 1);
+                            CharacterData remoteData = availableCharacters[clampedIndex];
+                            if (players[i].characterPortrait != null && remoteData.portraitSprite != null)
+                            {
+                                players[i].characterPortrait.sprite = remoteData.portraitSprite;
+                                hasKnownCharacter = true;
+                                remainingChars.Remove(remoteData);
+                            }
+                        }
+
+                        // ถ้ายังไม่มีข้อมูล (เพิ่งเข้าห้องยังไม่ได้รับ message CHAR) -> สุ่มไปก่อน
+                        if (!hasKnownCharacter && remainingChars.Count > 0) {
                             int r = Random.Range(0, remainingChars.Count);
                             CharacterData remoteData = remainingChars[r];
                             if (players[i].characterPortrait != null) players[i].characterPortrait.sprite = remoteData.portraitSprite;

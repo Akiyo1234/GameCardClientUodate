@@ -190,12 +190,12 @@ public class DailyQuizManager : MonoBehaviour
         }
     }
 
-    private void CheckDailyStatus()
+    private async void CheckDailyStatus()
     {
-        string lastDate = PlayerPrefs.GetString("LastDailyQuizDate", "");
-        string today = DateTime.Now.ToString("yyyy-MM-dd");
+        // [FIX] ตรวจสอบสิทธิ์รายวันจาก Database โดยตรง เพื่อไม่ให้แก้โดยลบ PlayerPrefs หรือเปลี่ยนเครื่อง
+        bool hasClaimed = await PlayerDataService.HasClaimedDailyQuizTodayAsync();
 
-        if (lastDate == today)
+        if (hasClaimed)
         {
             ShowAlreadyPlayed();
         }

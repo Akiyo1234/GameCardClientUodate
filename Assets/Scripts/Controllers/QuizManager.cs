@@ -478,13 +478,17 @@ public class QuizManager : MonoBehaviour
             // ส่งคำตอบไปยัง Network
             FusionManager.Instance.SendQuizAnswer(gameController != null ? gameController.LocalPlayerSeatIndex : 0, isCorrect, timeTaken);
             BeginWaitingForOnlineResults();
+
+            // [FIX] ถ้าเป็น Host และรับคำตอบจากทุกคนครบแล้ว รวมถึงตัวเองที่เพิ่งตอบ ให้จบเกมเลยทันที
+            if (IsOnlineQuizHost() && HaveAllPlayersAnswered())
+            {
+                ForceEndQuiz();
+            }
         }
         else
         {
-            // โหมดคนเดียว ประมวลผลทันที
-            isQuizActive = false;
-            // ส่งรางวัลให้ตรงกับโหมดออนไลน์: เหรียญดำ 1 เหรียญ (แยกจากกองกลาง) ให้เฉพาะคนตอบถูกเร็วสุด
-            ProcessQuizResults(currentAnswers, DetermineRewardGemIndices(currentAnswers));
+            // [FIX] โหมดคนเดียว (Offline): บังคับจบเกมเลยทันที (ForceEndQuiz จะเรียกให้บอทตอบให้ครบเอง)
+            ForceEndQuiz();
         }
     }
 
@@ -546,6 +550,12 @@ public class QuizManager : MonoBehaviour
         if (IsOnlineQuizMode() && !IsOnlineQuizHost())
         {
             return;
+        }
+
+        // [FIX] โหมดออฟไลน์: บังคับให้บอทที่ยังไม่ได้ตอบ ทำการตอบคำถามให้ครบ
+        if (gameController == null || !gameController.IsOnlineMatchMode)
+        {
+            SimulateOtherPlayers(gameController != null ? gameController.LocalPlayerSeatIndex : 0);
         }
 
         StopTimerSound(); // กันเสียง tick ค้างหลังหมดเวลา
