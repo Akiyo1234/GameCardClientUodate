@@ -56,8 +56,6 @@ public class ModeSelectUI : MonoBehaviour
 
         currentCharacterIndex = PlayerPrefs.GetInt("SelectedCharacter", 0);
         UpdateCharacterPreview();
-
-        // [FIX] Auto-setup button listeners
         if (dailyQuizButton != null)
         {
             dailyQuizButton.onClick.RemoveAllListeners();
@@ -429,3 +427,4 @@ public class ModeSelectUI : MonoBehaviour
         return string.IsNullOrWhiteSpace(humanName) ? "Player 1" : humanName;
     }
 }
+

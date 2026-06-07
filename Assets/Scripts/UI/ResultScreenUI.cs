@@ -131,7 +131,6 @@ public class ResultScreenUI : MonoBehaviour
         {
             int delta = PlayerPrefs.GetInt("LastMmrDelta", 0);
             int newMmr = PlayerPrefs.GetInt("MMR", 1000);
-            // [FIX] ล้างค่าทันทีหลังอ่าน ป้องกันค่าเก่าโผล่ในรอบถัดไป
             PlayerPrefs.DeleteKey("LastMmrDelta");
             PlayerPrefs.Save();
             string sign = delta >= 0 ? "+" : "";
@@ -188,3 +187,4 @@ public class ResultScreenUI : MonoBehaviour
         PlayerPrefs.Save();
     }
 }
+

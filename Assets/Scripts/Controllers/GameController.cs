@@ -77,7 +77,7 @@ public partial class GameController : MonoBehaviour
     private float currentTurnTime;
     public int winningScore = 20; 
     public int currentRound = 1; 
-    public int currentTurnDisplay = 1; // [NEW] เลขเทิร์นสำหรับเอาไปติดใน UI (นับ 1, 2, 3...)
+    public int currentTurnDisplay = 1; 
     public int totalTurnCount = 0;    // ตัวแปรนับตามระบบโปรแกรม
     public int quizInterval = 5;      // ช่วงเวลาเรียกควิซในโหมดออฟไลน์
     public int onlineQuizTurnInterval = 5; // ใช้เป็นช่วง "รอบ" ของควิซในโหมดออนไลน์
@@ -86,7 +86,7 @@ public partial class GameController : MonoBehaviour
 
     [Header("---- UI Alerts & Results ----")]
     public TextMeshProUGUI warningText; 
-    public TextMeshProUGUI turnCountText; // [NEW] ลาก Text บอกลำดับเทิร์นมาใส่ที่นี่
+    public TextMeshProUGUI turnCountText; 
     public ResultScreenUI resultScreen; // หน้าต่างสรุปผลอเนกประสงค์
     [Header("---- Reserve Confirmation UI ----")]
     public GameObject confirmReservePanel;
@@ -110,7 +110,7 @@ public partial class GameController : MonoBehaviour
     private int localPlayerSlotIndex;
     private bool playerPanelLayoutsCaptured;
     private PlayerPanelLayout[] capturedPlayerPanelLayouts;
-    private int[] pendingQuizTurnOrder; // [FIX] เก็บ Turn Order จาก Quiz ชั่วคราวก่อน Result ปิด
+    private int[] pendingQuizTurnOrder; 
 
     private struct PlayerPanelLayout
     {
@@ -155,8 +155,8 @@ public partial class GameController : MonoBehaviour
             FusionManager.Instance.EconomyStateReceived += HandleOnlineEconomyStateReceived;
             FusionManager.Instance.BoardStateReceived += HandleOnlineBoardStateReceived;
             FusionManager.Instance.FullStateRequested += HandleFullStateRequested;
-            FusionManager.Instance.PlayerCharacterReceived += ApplyRemoteCharacterPortrait; // [NEW]
-            FusionManager.Instance.PlayerFrameReceived += ApplyRemoteFrameUI; // [NEW]
+            FusionManager.Instance.PlayerCharacterReceived += ApplyRemoteCharacterPortrait; 
+            FusionManager.Instance.PlayerFrameReceived += ApplyRemoteFrameUI; 
         }
 
         EnsureBotController();
@@ -233,8 +233,6 @@ public partial class GameController : MonoBehaviour
         UpdateTurnVisuals();
         UpdateBankUI();
     }
-
-    // [NEW] ฟังก์ชันสำหรับปุ่ม Exit หรือ Leave Room (สำหรับลากไปใส่ OnClick ของปุ่ม)
     public void LeaveToMainMenu()
     {
         GameLog.Log("[GameController] Leaving match and returning to main menu...");
@@ -247,7 +245,7 @@ public partial class GameController : MonoBehaviour
         // 2. ปิดระบบเน็ตเวิร์ก (ถ้ามี)
         if (FusionManager.Instance != null)
         {
-            FusionManager.Instance.IsGameInProgress = false; // [FIX] Reset status
+            FusionManager.Instance.IsGameInProgress = false; 
             FusionManager.Instance.Disconnect();
         }
 
@@ -263,6 +261,11 @@ public partial class GameController : MonoBehaviour
     {
         ApplyNetworkPlayerNamesToUi();
         UpdateTurnCountUI();
+
+        if (isOnlineMatchMode && FusionManager.Instance != null)
+        {
+            StartCoroutine(DelayedSyncLocalProfile());
+        }
 
         if (ShouldWaitForOnlineOpponent())
         {
@@ -290,8 +293,6 @@ public partial class GameController : MonoBehaviour
 
         hasStartedInitialGameplay = true;
         ClearWarning();
-
-        // [NEW] แจ้ง FusionManager ว่าเกมเริ่มแล้ว เพื่อให้การไล่ OnPlayerLeft kick ทุกคนกลับ MainMenu
         if (FusionManager.Instance != null && isOnlineMatchMode)
         {
             FusionManager.Instance.IsGameInProgress = true;
@@ -349,7 +350,7 @@ public partial class GameController : MonoBehaviour
             FusionManager.Instance.EconomyStateReceived -= HandleOnlineEconomyStateReceived;
             FusionManager.Instance.BoardStateReceived -= HandleOnlineBoardStateReceived;
             FusionManager.Instance.FullStateRequested -= HandleFullStateRequested;
-            FusionManager.Instance.PlayerCharacterReceived -= ApplyRemoteCharacterPortrait; // [NEW]
+            FusionManager.Instance.PlayerCharacterReceived -= ApplyRemoteCharacterPortrait; 
         }
     }
 
@@ -374,8 +375,6 @@ public partial class GameController : MonoBehaviour
         if (playOrder == null || playOrder.Length == 0) return;
         if (isGameplayInputLocked) return;
         if (isWaitingForContinueAfterResult) return;
-
-        // [FIX] ป้องกัน Index Out of Range ถ้าคิวการเล่นผิดพลาด
         if (currentPlayerIndex < 0 || currentPlayerIndex >= playOrder.Length)
         {
             Debug.LogWarning($"[GameController] currentPlayerIndex {currentPlayerIndex} out of bounds (playOrder.Length={playOrder.Length}). Resetting to 0.");
@@ -399,7 +398,6 @@ public partial class GameController : MonoBehaviour
                 GameLog.Log($"[GameController] หมดเวลาในเทิร์นของผู้เล่น {playOrder[currentPlayerIndex] + 1}");
                 ShowWarning($"[ผู้เล่น {playOrder[currentPlayerIndex] + 1}] หมดเวลา! บังคับข้ามเทิร์น");
                 ClearPendingCoins();
-                // [FIX] ใช้ ForceEndTurn แทน EndTurn เพื่อให้ Host สามารถบังคับจบเทิร์นได้แม้เมื่อ:
                 // (1) เป็นเทิร์นของ Remote Player หรือ Bot ที่กำลังรอ Delay
                 // (2) ผู้เล่นหลุดกลางเทิร์น — ไม่โดนบล็อกจาก IsLocalPlayersTurn()
                 ForceEndTurn();
@@ -507,8 +505,6 @@ public partial class GameController : MonoBehaviour
                     else
                     {
                         finalName = GetOnlinePlayerDisplayNameForSeat(i);
-                        
-                        // [FIX] เช็คว่าได้รับ characterIndex ของคนนี้จาก FusionManager หรือยัง
                         bool hasKnownCharacter = false;
                         if (isOnlineMatchMode && FusionManager.Instance != null && 
                             FusionManager.Instance.TryGetPlayerCharacterBySeat(i, out int knownCharIndex))
@@ -557,8 +553,8 @@ public partial class GameController : MonoBehaviour
                 else if (isOnlineMatchMode && !players[i].isBot && FusionManager.Instance != null)
                 {
                     // ลองดึงกรอบของผู้เล่นอื่นที่เคยโหลดไว้แล้วมาใส่
-                    int remotePlayerId = FusionManager.Instance.GetPlayerIdForSeatIndex(i);
-                    if (remotePlayerId >= 0 && FusionManager.Instance.TryGetPlayerFrame(remotePlayerId, out string frameId) && !string.IsNullOrEmpty(frameId) && frameId != ShopManager.DEFAULT_FRAME)
+                    int remotePlayerId = FusionManager.Instance.GetPlayerIdBySeat(i);
+                    if (remotePlayerId >= 0 && FusionManager.Instance.TryGetPlayerFrame(remotePlayerId, out string frameId) && !string.IsNullOrEmpty(frameId))
                     {
                         Sprite frameSprite = Resources.Load<Sprite>($"Frames/{frameId}");
                         if (frameSprite != null)
@@ -653,3 +649,4 @@ public partial class GameController : MonoBehaviour
 
     // CheckNobles → moved to NobleManager.CheckClaim() (Assets/Scripts/Controllers/NobleManager.cs)
 }
+

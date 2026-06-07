@@ -43,7 +43,6 @@ public partial class GameController
 
     private bool IsMatchedOnlineSession()
     {
-        // [FIX] เช็คจาก GameMode ที่ตั้งมาจากหน้าเลือกโหมดโดยตรง
         string gameMode = PlayerPrefs.GetString("GameMode", "Bot");
         if (gameMode == "Online") return true;
         if (gameMode == "Bot") return false;
@@ -71,8 +70,6 @@ public partial class GameController
         {
             return;
         }
-
-        // [FIX] ถ้าเกมยังไม่เริ่ม ให้เรียก SetupPlayers() เหมือนเดิม
         // ถ้าเกมเริ่มไปแล้ว → ไม่เรียก SetupPlayers() อีก (กัน Turn Order รีเซ็ตกลางเกม)
         // สิ่งที่ทำแทน: แค่เช็คว่าคนไหนหลุด/เข้ามา และควบคุม isBot
         if (!hasStartedInitialGameplay)
@@ -100,7 +97,6 @@ public partial class GameController
         {
             // ——————————————————————————————————————————
             // เกมเริ่มไปแล้ว — ไม่รีเซ็ต SetupPlayers()
-            // [FIX] เช็คว่ามี seat ไหนหลุดหายไป แล้วตั้งเป็น Bot สำหรับเกมเล่นต่อแทน
             // ——————————————————————————————————————————
             if (FusionManager.Instance != null)
             {
@@ -128,8 +124,6 @@ public partial class GameController
             }
         }
     }
-
-    // [FIX] เช็ค seat index ที่ Fusion ไม่มีตัวตนอยู่แล้ว และตั้ง isBot = true/false ตามสถานะการเชื่อมต่อ
     private void UpdateDisconnectedPlayerBotStatus()
     {
         if (FusionManager.Instance == null || players == null) return;
@@ -229,8 +223,6 @@ public partial class GameController
             GameLog.Log($"[GameController] Updated player slot {seatIndex + 1} name to {playerName}");
         }
     }
-
-    // [NEW] รับ event PlayerCharacterReceived (playerId, characterIndex) จาก FusionManager
     // แล้วอัปเดต characterPortrait ของ seat ที่ตรงกับ playerId นั้น
     private void ApplyRemoteCharacterPortrait(int playerId, int characterIndex)
     {
@@ -258,8 +250,6 @@ public partial class GameController
             GameLog.Log($"[GameController] Set avatar for seat {seatIndex} (playerId={playerId}) → {charData.characterName}");
         }
     }
-
-    // [NEW] รับ event PlayerFrameReceived (playerId, frameId) จาก FusionManager
     private void ApplyRemoteFrameUI(int playerId, string frameId)
     {
         if (!isOnlineMatchMode || players == null)
@@ -277,7 +267,7 @@ public partial class GameController
         }
 
         Sprite frameSprite = null;
-        if (!string.IsNullOrEmpty(frameId) && frameId != ShopManager.DEFAULT_FRAME)
+        if (!string.IsNullOrEmpty(frameId))
         {
             frameSprite = Resources.Load<Sprite>($"Frames/{frameId}");
         }
@@ -599,6 +589,31 @@ public partial class GameController
         return null;
     }
 
+    private IEnumerator DelayedSyncLocalProfile()
+    {
+        // หน่วงเวลาเล็กน้อยเพื่อให้แน่ใจว่าโหลดฉากเสร็จและ Event/RPC ต่างๆ ของ Photon พร้อมใช้งาน
+        yield return new WaitForSeconds(0.5f);
+        
+        if (FusionManager.Instance != null && FusionManager.Instance.Runner != null)
+        {
+            int myCharIndex = UnityEngine.PlayerPrefs.GetInt("SelectedCharacter", 0);
+            string myFrameId = ShopManager.GetEquippedFrame();
+            
+            if (FusionManager.Instance.IsMasterClient)
+            {
+                FusionManager.Instance.BroadcastLocalCharacter(myCharIndex);
+                FusionManager.Instance.BroadcastLocalFrame(myFrameId);
+                GameLog.Log($"[GameController] Delayed sync: Master broadcasted Character={myCharIndex}, Frame={myFrameId}");
+            }
+            else
+            {
+                FusionManager.Instance.SendLocalCharacterToServer(myCharIndex);
+                FusionManager.Instance.SendLocalFrameToServer(myFrameId);
+                GameLog.Log($"[GameController] Delayed sync: Client sent Character={myCharIndex}, Frame={myFrameId} to Master");
+            }
+        }
+    }
+
     private void RebuildReservedAreaIfChanged(PlayerUI player, string[] cardIds)
     {
         if (player == null || cardIds == null)
@@ -801,8 +816,6 @@ public partial class GameController
         rectTransform.localScale = layout.LocalScale;
         rectTransform.localRotation = layout.LocalRotation;
         rectTransform.SetSiblingIndex(layout.SiblingIndex);
-
-        // [FIX] ปรับตำแหน่ง reservedAreaTransform ให้อยู่ด้านล่าง Panel เสมอ
         // Player Panel ที่อยู่ด้านบนหน้าจอ (anchorMin.y >= 0.5) จะต้อง flip กรอบจองการ์ดลงล่าง
         if (player.reservedAreaTransform != null && player.reservedAreaTransform.TryGetComponent(out RectTransform reservedRT))
         {
@@ -843,3 +856,4 @@ public partial class GameController
         return Mathf.Clamp(PlayerPrefs.GetInt(MatchmakingTargetPlayerCountPrefsKey, 2), 2, Mathf.Min(4, players != null && players.Length > 0 ? players.Length : 4));
     }
 }
+

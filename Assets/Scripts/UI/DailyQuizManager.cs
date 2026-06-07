@@ -62,7 +62,6 @@ public class DailyQuizManager : MonoBehaviour
 
     private QuizDatabase quizDb;
     private QuizQuestion currentQuestion;
-    // [FIX] เก็บ correct index หลัง shuffle แยกออกมา
     // ห้ามแก้ currentQuestion.correctIndex โดยตรงเพราะมันชี้ไปที่ object ต้นฉบับใน quizDb
     private int _shuffledCorrectIndex;
     private float currentTime;
@@ -192,7 +191,6 @@ public class DailyQuizManager : MonoBehaviour
 
     private async void CheckDailyStatus()
     {
-        // [FIX] ตรวจสอบสิทธิ์รายวันจาก Database โดยตรง เพื่อไม่ให้แก้โดยลบ PlayerPrefs หรือเปลี่ยนเครื่อง
         bool hasClaimed = await PlayerDataService.HasClaimedDailyQuizTodayAsync();
 
         if (hasClaimed)
@@ -548,3 +546,4 @@ public class DailyQuizManager : MonoBehaviour
         }
     }
 }
+

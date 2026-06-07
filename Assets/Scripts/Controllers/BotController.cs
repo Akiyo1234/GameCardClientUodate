@@ -5,8 +5,6 @@ using System.Linq;
 public class BotController : MonoBehaviour
 {
     private GameController gameController;
-
-    // [FIX] cache color→button map แทนการ Find() ทุก call
     // key = resource index (0-4), value = ResourceButton
     private Dictionary<int, ResourceButton> _colorToButtonCache;
 
@@ -121,14 +119,12 @@ public class BotController : MonoBehaviour
         if (gameController == null) return;
 
         PlayerUI botPlayer = gameController.players[playerIndex];
-        // [FIX] null-safe nameText + รีเฟรช cache ถ้ายังไม่มี
         _colorToButtonCache = null; // invalidate cache ทุก turn เผื่อ bankButtons เปลี่ยน
         _activeProfile = GetProfile(playerIndex); // โหลดบุคลิกของบอท seat นี้
         string botName = botPlayer?.nameText != null ? botPlayer.nameText.text : $"Bot {playerIndex + 1}";
         GameLog.Log($"<color=orange>[Bot] เริ่มเทิร์นของบอท: {botName} ({_activeProfile.archetype})</color>");
 
         bool actionTaken = false;
-        // [FIX] ครอบ try/finally รับประกันว่าถ้าเกิด Exception หรือทุก action ล้มเหลว
         // เกมจะยัง EndTurn ให้เสมอ ไม่ค้างถาวร
         try
         {
@@ -153,7 +149,6 @@ public class BotController : MonoBehaviour
             }
 
             // --- Priority 3: Reserve Important Tier 3 ---
-            // [FIX] เช็ค pendingReserveCard หลัง Prompt เพื่อยืนยันว่า action ไม่โดนบล็อก
             CardDisplay reserveTarget = FindReserveTarget(botPlayer);
             if (reserveTarget != null)
             {
@@ -179,7 +174,6 @@ public class BotController : MonoBehaviour
         }
         finally
         {
-            // [FIX] Safety net: ถ้าทุก action ล้มเหลวหรือเกิด Exception โดยไม่มี EndTurn
             // ให้บังคับ EndTurn เพื่อไม่ให้เกมค้าง
             if (!actionTaken)
             {
@@ -258,10 +252,7 @@ public class BotController : MonoBehaviour
         List<int> colorsToPick = new List<int>();
 
         // กฎการหยิบเหรียญ: 
-        // [FIX] ใช้ cache แทน Find() ทุก call
         var colorMap = GetColorButtonMap();
-
-        // [FIX] คำนวณ capacity ที่เหลือก่อนตัดสินใจหยิบ 2 อัน
         int currentTotalCoins = 0;
         for (int ci = 0; ci < 6; ci++) currentTotalCoins += player.coins[ci];
         int coinCapacityLeft = 10 - currentTotalCoins;
@@ -427,3 +418,4 @@ public class BotController : MonoBehaviour
         return Enumerable.Range(0, 5).OrderByDescending(i => scores[i]).ToArray();
     }
 }
+

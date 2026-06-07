@@ -76,10 +76,8 @@ public partial class GameController
     public void OnResultScreenClosed()
     {
         SetWaitingForContinueAfterResult(false);
-        SetGameplayInputLocked(false); // [FIX] ปลดล็อกให้แน่ใจว่ากลับมาเล่นต่อได้
+        SetGameplayInputLocked(false); 
         ClearWarning();
-
-        // [FIX] ถ้ามี Turn Order ที่ Quiz ส่งมา ให้ Apply ก่อน แล้วค่อย Schedule Bot
         if (pendingQuizTurnOrder != null)
         {
             GameLog.Log("[GameController] Applying pending quiz turn order from OnResultScreenClosed");
@@ -176,7 +174,6 @@ public partial class GameController
     {
         if (BlockActionDuringQuiz()) return;
         if (BlockActionUntilContinue()) return;
-        // [FIX] ไม่ block บอท — BlockActionOutsideLocalTurn ใช้สำหรับ input จาก UI เท่านั้น
         // บอทเรียก EndTurn() โดยตรงจาก BotController ซึ่งถูกต้องแล้ว
         if (IsCurrentPlayerBot() && !isExecutingBotTurn) {
             ShowWarning("กำลังเป็นเทิร์นของบอท");
@@ -295,7 +292,6 @@ public partial class GameController
         int highestScore = 0;
 
         for (int i = 0; i < activePlayerCount; i++) {
-            // [FIX] null check ก่อน access เพื่อป้องกัน NullReferenceException
             if (players[i] == null) continue;
             if (players[i].currentScore >= winningScore && players[i].currentScore > highestScore) {
                 highestScore = players[i].currentScore;
@@ -364,7 +360,6 @@ public partial class GameController
                 List<string> rankings = new List<string>();
                 for (int i = 0; i < activePlayerCount; i++)
                 {
-                    // [FIX] null-safe nameText เพื่อป้องกัน crash ถ้า prefab ไม่ได้ลาก text ใส่
                     if (players[i] != null)
                     {
                         string pName = players[i].nameText != null ? players[i].nameText.text : $"Player {i + 1}";
@@ -401,8 +396,6 @@ public partial class GameController
         for (int i = 0; i < players.Length; i++)
             if (players[i] != null) players[i].SetActiveTurn(i == activePlayerIdx);
     }
-
-    // [NEW] อัปเดตตัวเลขเทิร์นบน UI
     public void UpdateTurnCountUI()
     {
         if (turnCountText != null)
@@ -490,3 +483,4 @@ public partial class GameController
         if (!shouldStartQuiz) ScheduleBotTurnIfNeeded();
     }
 }
+

@@ -93,7 +93,6 @@ public class PlayerUI : MonoBehaviour
     }
 
     public void UpdateUI() {
-        // [FIX] null-guard array ก่อน + bounds check ทั้งสองด้าน ป้องกัน NullRef / IndexOutOfRange
         if (coinTexts != null)
             for (int i = 0; i < coinTexts.Length && i < coins.Length; i++)
                 if (coinTexts[i] != null) coinTexts[i].text = coins[i].ToString();
@@ -126,7 +125,6 @@ public class PlayerUI : MonoBehaviour
 
         if (panelBackground != null)
         {
-            // [FIX] ไม่ดรอปสีเป็นสีเทา (0.7f) แล้ว เพื่อรักษาสีจริงของกรอบ PNG ให้สวยงามตลอดเวลา
             // และใช้ activeTurnBorder เป็นตัวบอกว่าใครกำลังเล่นแทน
             panelBackground.color = Color.white;
         }
@@ -173,3 +171,4 @@ public class PlayerUI : MonoBehaviour
         panelBackground.color = new Color(0.7f, 0.7f, 0.7f, 1f);
     }
 }
+

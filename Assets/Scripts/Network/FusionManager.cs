@@ -49,9 +49,8 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     public event Action QuizStartRequested;       // Client ขอเริ่มควิซ
     // late-joiner ขอ full state จาก host — ส่ง playerId ของคนที่ขอ เพื่อให้ host ตอบกลับเฉพาะคนนั้น
     public event Action<int> FullStateRequested;
-    // [NEW] เมื่อรับข้อมูล characterIndex ของผู้เล่นคนอื่น (playerId, characterIndex)
     public event Action<int, int> PlayerCharacterReceived;
-    public event Action<int, string> PlayerFrameReceived; // [NEW]
+    public event Action<int, string> PlayerFrameReceived; 
 
     private const char PlayerNameSeparator = '|';
     private const string PlayerNameMessageType = "NAME";
@@ -63,26 +62,20 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     private const string BoardStateMessageType = "BOARD";
     private const string QuizRequestMessageType = "QUIZREQ";
     private const string StateRequestMessageType = "STATEREQ";
-    private const string CharacterMessageType = "CHAR"; // [NEW] sync avatar
-    private const string FrameMessageType = "FRAME"; // [NEW] sync UI frame
+    private const string CharacterMessageType = "CHAR"; 
+    private const string FrameMessageType = "FRAME"; 
 
     private NetworkRunner _runner;
     private NetworkSceneManagerDefault _sceneManager;
     private readonly Dictionary<int, string> _playerNames = new Dictionary<int, string>();
     private readonly Dictionary<int, int> _playerCharacters = new Dictionary<int, int>();
-    private readonly Dictionary<int, string> _playerFrames = new Dictionary<int, string>(); // [NEW]
+    private readonly Dictionary<int, string> _playerFrames = new Dictionary<int, string>(); 
 
     // [Shared Mode → Step 5] Stable seat map: index = seat, value = PlayerId (เรียงตามลำดับเข้าห้อง = id จากน้อยไปมาก)
-    //   ตรึงครั้งเดียว — "ไม่ลบ" เมื่อมีคนออก เพื่อให้ seat ของคนที่เหลือคงที่ (กันบั๊ก seat เลื่อนสวมรอยคนที่ออก)
     private readonly List<int> _seatOrder = new List<int>();
 
-    public Action ActivePlayersChanged;
-    public Action PlayerNamesUpdated;
-    public Action<int, int> PlayerCharacterReceived; // [NEW]
-    public Action<int, string> PlayerFrameReceived; // [NEW]
     private bool _hasPendingQuizStart;
     private int _pendingQuizStartIndex = -1;
-    // [NEW] ติดตามว่าเกมเริ่มไปแล้วหรือยัง เพื่อใช้ตัดสินว่าควร kick กลับ MainMenu เมื่อคนออกกลางเกม
     public bool IsGameInProgress { get; set; } = false;
 
     public struct QuizAnswerSnapshot
@@ -229,7 +222,6 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     // =============================================================================
     public void StartMatchedGame(string roomCode, string sceneName = null, Action<string> onFail = null, bool? isHost = null)
     {
-        // [FIX] ระบุว่าเป็นโหมดออนไลน์
         PlayerPrefs.SetString("GameMode", "Online");
         PlayerPrefs.Save();
 
@@ -310,7 +302,6 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     // แต่ภายในเปลี่ยนไปใช้ Coroutine เพื่อรับประกัน Main Thread safety บน Android
     public async Task StartGame(GameMode mode, string roomName, string sceneToLoad = null)
     {
-        // [FIX] ระบุว่าเป็นโหมดออนไลน์เสมอเมื่อมีการเริ่ม Network
         PlayerPrefs.SetString("GameMode", "Online");
         PlayerPrefs.Save();
 
@@ -332,7 +323,6 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     // ── Public entry: Coroutine version ──
     public Coroutine StartGameCoroutine(GameMode mode, string roomName, string sceneToLoad = null)
     {
-        // [FIX] ตั้ง GameMode = Online เหมือนกับ StartGame() และ StartMatchedGame()
         // ถ้าไม่ตั้งตรงนี้ → GameController.IsMatchedOnlineSession() จะคืนค่า false → เล่นกับ Bot แทน
         PlayerPrefs.SetString("GameMode", "Online");
         PlayerPrefs.Save();
@@ -521,7 +511,6 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         if (player == runner.LocalPlayer && !IsLocalAuthority(runner))
         {
             SendLocalPlayerNameToServer();
-            // [NEW] ส่ง characterIndex และ frameId ของตัวเองไปหา Host เพื่อ sync UI
             int myCharIndex = UnityEngine.PlayerPrefs.GetInt("SelectedCharacter", 0);
             SendLocalCharacterToServer(myCharIndex);
             
@@ -531,7 +520,6 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
 
         if (IsLocalAuthority(runner) && player == runner.LocalPlayer)
         {
-            // [NEW] Authority ส่ง characterIndex และ frameId ของตัวเองให้ทุกคนที่อยู่ในห้องแล้ว
             int myCharIndex = UnityEngine.PlayerPrefs.GetInt("SelectedCharacter", 0);
             BroadcastLocalCharacter(myCharIndex);
 
@@ -592,7 +580,6 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         string list = "Players in Room:\n";
         foreach (var p in runner.ActivePlayers)
         {
-            // [FIX] ดึงชื่อจริงจาก _playerNames dictionary แทน PlayerId ตัวเลข
             string displayName;
             if (_playerNames.TryGetValue(p.PlayerId, out string realName) && !string.IsNullOrWhiteSpace(realName))
             {
@@ -691,8 +678,6 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
 
             return;
         }
-
-        // [NEW] CHAR|playerId|characterIndex → sync avatar
         if (string.Equals(parts[0], CharacterMessageType, StringComparison.Ordinal))
         {
             if (parts.Length < 3 || !int.TryParse(parts[1], out int charPlayerId) || !int.TryParse(parts[2], out int charIndex))
@@ -716,8 +701,6 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
 
             return;
         }
-
-        // [NEW] FRAME|playerId|frameId   sync UI frame
         if (string.Equals(parts[0], FrameMessageType, StringComparison.Ordinal))
         {
             if (parts.Length < 3 || !int.TryParse(parts[1], out int framePlayerId))
@@ -1100,8 +1083,6 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
 
         return TryGetPlayerCharacter(playerId, out characterIndex);
     }
-
-    // [NEW] หา seat index (0-based) จาก playerId — ใช้ตอน sync avatar (อิง stable seat map)
     public int GetSeatIndexForPlayerId(int playerId)
     {
         return _seatOrder.IndexOf(playerId);
@@ -1371,8 +1352,6 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         byte[] payload = EncodePlayerNamePayload(_runner.LocalPlayer.PlayerId, localName);
         SendToAuthority(payload);
     }
-
-    // [NEW] ผู้เล่น local ส่ง characterIndex ไปหา Server/Host
     public void SendLocalCharacterToServer(int characterIndex)
     {
         if (_runner == null) return;
@@ -1381,8 +1360,6 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         byte[] payload = Encoding.UTF8.GetBytes($"{CharacterMessageType}{PlayerNameSeparator}{localId}{PlayerNameSeparator}{characterIndex}");
         SendToAuthority(payload);
     }
-
-    // [NEW] Host ส่ง characterIndex ปัจจุบันของตัวเองไปหา client ที่เพิ่งเข้า
     public void BroadcastLocalCharacter(int characterIndex)
     {
         if (_runner == null || !IsLocalAuthority(_runner)) return;
@@ -1395,14 +1372,10 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
             _runner.SendReliableDataToPlayer(p, default, payload);
         }
     }
-
-    // [NEW] ดึง characterIndex จาก dictionary (ใช้ใน GameController ตอนตั้งค่า remote avatar)
     public bool TryGetPlayerCharacter(int playerId, out int characterIndex)
     {
         return _playerCharacters.TryGetValue(playerId, out characterIndex);
     }
-
-    // [NEW] ส่ง frameId ท้องถิ่นไปให้ Server (Host)
     public void SendLocalFrameToServer(string frameId)
     {
         if (_runner == null) return;
@@ -1411,8 +1384,6 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         byte[] payload = Encoding.UTF8.GetBytes($"{FrameMessageType}{PlayerNameSeparator}{localId}{PlayerNameSeparator}{frameId}");
         SendToAuthority(payload);
     }
-
-    // [NEW] Host ประกาศ frameId ของตัวเองให้ Client อื่นๆ ทราบ
     public void BroadcastLocalFrame(string frameId)
     {
         if (_runner == null || !IsLocalAuthority(_runner)) return;
@@ -1425,8 +1396,6 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
             _runner.SendReliableDataToPlayer(p, default, payload);
         }
     }
-
-    // [NEW]
     public bool TryGetPlayerFrame(int playerId, out string frameId)
     {
         return _playerFrames.TryGetValue(playerId, out frameId);
@@ -1444,15 +1413,11 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
             byte[] payload = EncodePlayerNamePayload(pair.Key, pair.Value);
             _runner.SendReliableDataToPlayer(targetPlayer, default, payload);
         }
-
-        // [NEW] ส่ง characterIndex ที่รู้จักให้คนใหม่ด้วย
         foreach (var pair in _playerCharacters)
         {
             byte[] charPayload = Encoding.UTF8.GetBytes($"{CharacterMessageType}{PlayerNameSeparator}{pair.Key}{PlayerNameSeparator}{pair.Value}");
             _runner.SendReliableDataToPlayer(targetPlayer, default, charPayload);
         }
-
-        // [NEW] ส่ง frameId ที่รู้จักให้คนใหม่ด้วย
         foreach (var pair in _playerFrames)
         {
             byte[] framePayload = Encoding.UTF8.GetBytes($"{FrameMessageType}{PlayerNameSeparator}{pair.Key}{PlayerNameSeparator}{pair.Value}");
@@ -1493,7 +1458,6 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     private void NotifyPlayerNamesUpdated()
     {
         PlayerNamesUpdated?.Invoke();
-        // [FIX] refresh lobby player list ทันทีที่ได้ชื่อใหม่ (ไม่รอให้มีคนเข้า/ออกก่อน)
         if (_runner != null && _runner.IsRunning && LobbyUI.Instance != null)
         {
             RefreshPlayerList(_runner);
@@ -1753,3 +1717,4 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         return string.IsNullOrWhiteSpace(savedName) ? "Player " + fallbackPlayerId : savedName;
     }
 }
+

@@ -87,8 +87,6 @@ public class RankUI : MonoBehaviour
             }
         }
 #endif
-
-        // [FIX] เปลี่ยนระบบ: ถ้ามี UI "Card" อยู่แล้วใน Scene ให้ทำการ Link Reference เดิม
         // จะได้ไม่ทำลาย UI ที่ผู้ใช้อุตส่าห์จัดวางหรือแก้สีไว้ใน Editor ตอนกด Play
         Transform existingCard = transform.Find("Card");
         if (existingCard != null)
@@ -859,3 +857,4 @@ public class RankUI : MonoBehaviour
         return tmp;
     }
 }
+

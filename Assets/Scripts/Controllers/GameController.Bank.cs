@@ -29,7 +29,6 @@ public partial class GameController
     {
         if (BlockActionDuringQuiz()) return;
         if (BlockActionUntilContinue()) return;
-        // [FIX] ไม่ block บอท — บอทเรียก ClearPendingCoins ภายในเทิร์นของตัวเอง
         System.Array.Clear(pendingCoins, 0, 6);
         foreach (var btn in bankButtons) if (btn != null) btn.UpdatePendingUI(0);
         ClearWarning();
@@ -174,3 +173,4 @@ public partial class GameController
         }
     }
 }
+

@@ -136,7 +136,6 @@ public class ShopUI : MonoBehaviour
 
         if (previewFrameImage != null)
         {
-            // [FIX] ถ้ามี Sprite (PNG Frame) ให้ใช้สีขาว 100% เพื่อไม่ให้สีไปย้อมทับรูป
             previewFrameImage.color   = (item.frameSprite != null) ? Color.white : item.frameColor;
             previewFrameImage.sprite  = item.frameSprite;
             previewFrameImage.enabled = true;
@@ -206,3 +205,4 @@ public class ShopUI : MonoBehaviour
         toastText.gameObject.SetActive(false);
     }
 }
+

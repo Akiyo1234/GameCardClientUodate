@@ -130,7 +130,6 @@ public class SupabaseManager : MonoBehaviour
         }
         catch (System.Exception e)
         {
-            // [FIX] ใช้ LogWarning แทน LogError สำหรับกรณีรหัสผิด
             // เพื่อป้องกัน Unity Editor เปิดฟีเจอร์ "Error Pause" แล้วทำให้เกมหยุดค้าง
             Debug.LogWarning($"<color=orange>⚠️ [Supabase] ล็อกอินไม่สำเร็จ: {e.Message}</color>");
             return (false, e.Message);
@@ -216,3 +215,4 @@ public class SupabaseManager : MonoBehaviour
         }
     }
 }
+
