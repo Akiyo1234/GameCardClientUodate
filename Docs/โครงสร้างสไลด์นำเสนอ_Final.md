@@ -100,11 +100,13 @@
   * **4. โครงสร้างไฟล์คลังข้อสอบออฟไลน์ (`quiz_database.json`):**
     * `version` (TEXT) / `totalQuestions` (INT) / `questions` (ARRAY)
     * รายละเอียดข้อสอบย่อย: `id` (TEXT), `category` (TEXT), `difficulty` (TEXT), `question` (TEXT), `choices` (ARRAY), `correctIndex` (INT)
+    * **สาธิตระบบ (Live Demo):**
+    * ลิงก์เข้าระบบจัดการข้อสอบ: [https://startup-city-quiz-thanapat.surge.sh/quiz_admin.html](https://startup-city-quiz-thanapat.surge.sh/quiz_admin.html)
 * **รูปภาพประกอบ:**
   * `[รูป: แผนผัง Database ER-Diagram แสดงตารางหลักทั้ง 3 และความสัมพันธ์]` (ดูรูปได้ที่: [supabase_database_schema.png](file:///d:/ProjectGameCard/GameCardClient/Docs/supabase_database_schema.png))
 * **บทพูดนำเสนอ (Presenter Note):**
   * *"สำหรับการออกแบบฐานข้อมูลระบบแกนหลัก เราอ้างอิงตามในเล่มรายงาน 3 ตารางหลักครับ คือ player_profiles สำหรับเก็บข้อมูล MMR และของสะสมผู้เล่น, rooms สำหรับเก็บข้อมูลห้อง และ matchmaking_queue สำหรับระบบจัดคิวจับคู่แบบเรียลไทม์ครับ"*
-  * *"และในระบบยังมีไฟล์โครงสร้างข้อมูลแบบ JSON ชื่อ quiz_database.json สำหรับเก็บคลังคำถามวิชาการแบบออฟไลน์ ประกอบด้วยข้อมูลโจทย์, ตัวเลือกตอบ 4 ตัวเลือก และดัชนีเฉลยคำตอบที่ถูกต้อง (correctIndex 0-3) ซึ่งโครงสร้างทั้งหมดได้รับการออกแบบให้สอดคล้องกันตามเล่มโครงงานที่ส่งมอบครับ"*
+  * *"และในระบบยังมีไฟล์โครงสร้างข้อมูลแบบ JSON ชื่อ quiz_database.json สำหรับเก็บคลังคำถามวิชาการแบบออฟไลน์ ซึ่งเราสามารถเปิดและบริหารจัดการคลังคำถามนี้ได้อย่างสะดวกผ่านหน้าเว็บพอร์ทัล Quiz Admin ตามลิงก์สไลด์นี้เลยครับ ประกอบด้วยข้อมูลโจทย์, ตัวเลือกตอบ 4 ตัวเลือก และดัชนีเฉลยที่ถูกต้อง ซึ่งเราอัปเดตและส่งออกไฟล์กลับมาทับในตัวเกมได้ทันทีครับ"*
 
 ---
 

@@ -12277,7 +12277,7 @@ MonoBehaviour:
       m_Calls:
       - m_Target: {fileID: 314157365}
         m_TargetAssemblyTypeName: GameController, Assembly-CSharp
-        m_MethodName: TestAddScoreToPlayer1
+        m_MethodName: TestGiveBonusToPlayer1
         m_Mode: 1
         m_Arguments:
           m_ObjectArgument: {fileID: 0}

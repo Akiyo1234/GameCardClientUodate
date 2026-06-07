@@ -51,6 +51,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     public event Action<int> FullStateRequested;
     // [NEW] เมื่อรับข้อมูล characterIndex ของผู้เล่นคนอื่น (playerId, characterIndex)
     public event Action<int, int> PlayerCharacterReceived;
+    public event Action<int, string> PlayerFrameReceived; // [NEW]
 
     private const char PlayerNameSeparator = '|';
     private const string PlayerNameMessageType = "NAME";
@@ -63,13 +64,22 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     private const string QuizRequestMessageType = "QUIZREQ";
     private const string StateRequestMessageType = "STATEREQ";
     private const string CharacterMessageType = "CHAR"; // [NEW] sync avatar
+    private const string FrameMessageType = "FRAME"; // [NEW] sync UI frame
+
     private NetworkRunner _runner;
     private NetworkSceneManagerDefault _sceneManager;
     private readonly Dictionary<int, string> _playerNames = new Dictionary<int, string>();
-    // [Shared Mode · Step 5] Stable seat map: index = seat, value = PlayerId (เรียงตามลำดับเข้าห้อง = id จากน้อยไปมาก)
+    private readonly Dictionary<int, int> _playerCharacters = new Dictionary<int, int>();
+    private readonly Dictionary<int, string> _playerFrames = new Dictionary<int, string>(); // [NEW]
+
+    // [Shared Mode → Step 5] Stable seat map: index = seat, value = PlayerId (เรียงตามลำดับเข้าห้อง = id จากน้อยไปมาก)
     //   ตรึงครั้งเดียว — "ไม่ลบ" เมื่อมีคนออก เพื่อให้ seat ของคนที่เหลือคงที่ (กันบั๊ก seat เลื่อนสวมรอยคนที่ออก)
     private readonly List<int> _seatOrder = new List<int>();
-    private readonly Dictionary<int, int> _playerCharacters = new Dictionary<int, int>(); // [NEW] playerId -> characterIndex
+
+    public Action ActivePlayersChanged;
+    public Action PlayerNamesUpdated;
+    public Action<int, int> PlayerCharacterReceived; // [NEW]
+    public Action<int, string> PlayerFrameReceived; // [NEW]
     private bool _hasPendingQuizStart;
     private int _pendingQuizStartIndex = -1;
     // [NEW] ติดตามว่าเกมเริ่มไปแล้วหรือยัง เพื่อใช้ตัดสินว่าควร kick กลับ MainMenu เมื่อคนออกกลางเกม
@@ -511,16 +521,22 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         if (player == runner.LocalPlayer && !IsLocalAuthority(runner))
         {
             SendLocalPlayerNameToServer();
-            // [NEW] ส่ง characterIndex ของตัวเองไปหา Host เพื่อ sync รูป avatar
+            // [NEW] ส่ง characterIndex และ frameId ของตัวเองไปหา Host เพื่อ sync UI
             int myCharIndex = UnityEngine.PlayerPrefs.GetInt("SelectedCharacter", 0);
             SendLocalCharacterToServer(myCharIndex);
+            
+            string myFrameId = ShopManager.GetEquippedFrame();
+            SendLocalFrameToServer(myFrameId);
         }
 
         if (IsLocalAuthority(runner) && player == runner.LocalPlayer)
         {
-            // [NEW] Authority ส่ง characterIndex ของตัวเองให้ทุกคนที่อยู่ในห้องแล้ว
+            // [NEW] Authority ส่ง characterIndex และ frameId ของตัวเองให้ทุกคนที่อยู่ในห้องแล้ว
             int myCharIndex = UnityEngine.PlayerPrefs.GetInt("SelectedCharacter", 0);
             BroadcastLocalCharacter(myCharIndex);
+
+            string myFrameId = ShopManager.GetEquippedFrame();
+            BroadcastLocalFrame(myFrameId);
         }
 
         RefreshSeatOrder(runner); // ตรึง seat ของผู้เล่นใหม่ (ก่อน refresh UI)
@@ -689,11 +705,36 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
 
             if (IsLocalAuthority(runner))
             {
-                // Broadcast ต่อให้ทุกคน
+                // Broadcast ต่อให้ทุกคนยกเว้นตัวเองและคนส่ง
                 byte[] rawData = data.ToArray();
                 foreach (var activePlayer in runner.ActivePlayers)
                 {
-                    if (activePlayer == player) continue;
+                    if (activePlayer == player || activePlayer == runner.LocalPlayer) continue;
+                    runner.SendReliableDataToPlayer(activePlayer, default, rawData);
+                }
+            }
+
+            return;
+        }
+
+        // [NEW] FRAME|playerId|frameId   sync UI frame
+        if (string.Equals(parts[0], FrameMessageType, StringComparison.Ordinal))
+        {
+            if (parts.Length < 3 || !int.TryParse(parts[1], out int framePlayerId))
+            {
+                return;
+            }
+
+            string frameId = parts[2];
+            _playerFrames[framePlayerId] = frameId;
+            PlayerFrameReceived?.Invoke(framePlayerId, frameId);
+
+            if (IsLocalAuthority(runner))
+            {
+                byte[] rawData = data.ToArray();
+                foreach (var activePlayer in runner.ActivePlayers)
+                {
+                    if (activePlayer == player || activePlayer == runner.LocalPlayer) continue;
                     runner.SendReliableDataToPlayer(activePlayer, default, rawData);
                 }
             }
@@ -1361,6 +1402,36 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         return _playerCharacters.TryGetValue(playerId, out characterIndex);
     }
 
+    // [NEW] ส่ง frameId ท้องถิ่นไปให้ Server (Host)
+    public void SendLocalFrameToServer(string frameId)
+    {
+        if (_runner == null) return;
+        int localId = _runner.LocalPlayer.PlayerId;
+        _playerFrames[localId] = frameId;
+        byte[] payload = Encoding.UTF8.GetBytes($"{FrameMessageType}{PlayerNameSeparator}{localId}{PlayerNameSeparator}{frameId}");
+        SendToAuthority(payload);
+    }
+
+    // [NEW] Host ประกาศ frameId ของตัวเองให้ Client อื่นๆ ทราบ
+    public void BroadcastLocalFrame(string frameId)
+    {
+        if (_runner == null || !IsLocalAuthority(_runner)) return;
+        int localId = _runner.LocalPlayer.PlayerId;
+        _playerFrames[localId] = frameId;
+        byte[] payload = Encoding.UTF8.GetBytes($"{FrameMessageType}{PlayerNameSeparator}{localId}{PlayerNameSeparator}{frameId}");
+        foreach (var p in _runner.ActivePlayers)
+        {
+            if (p == _runner.LocalPlayer) continue;
+            _runner.SendReliableDataToPlayer(p, default, payload);
+        }
+    }
+
+    // [NEW]
+    public bool TryGetPlayerFrame(int playerId, out string frameId)
+    {
+        return _playerFrames.TryGetValue(playerId, out frameId);
+    }
+
     private void SendKnownPlayerNamesToPlayer(PlayerRef targetPlayer)
     {
         if (_runner == null || !IsLocalAuthority(_runner))
@@ -1379,6 +1450,13 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         {
             byte[] charPayload = Encoding.UTF8.GetBytes($"{CharacterMessageType}{PlayerNameSeparator}{pair.Key}{PlayerNameSeparator}{pair.Value}");
             _runner.SendReliableDataToPlayer(targetPlayer, default, charPayload);
+        }
+
+        // [NEW] ส่ง frameId ที่รู้จักให้คนใหม่ด้วย
+        foreach (var pair in _playerFrames)
+        {
+            byte[] framePayload = Encoding.UTF8.GetBytes($"{FrameMessageType}{PlayerNameSeparator}{pair.Key}{PlayerNameSeparator}{pair.Value}");
+            _runner.SendReliableDataToPlayer(targetPlayer, default, framePayload);
         }
     }
 

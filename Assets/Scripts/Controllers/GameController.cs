@@ -156,6 +156,7 @@ public partial class GameController : MonoBehaviour
             FusionManager.Instance.BoardStateReceived += HandleOnlineBoardStateReceived;
             FusionManager.Instance.FullStateRequested += HandleFullStateRequested;
             FusionManager.Instance.PlayerCharacterReceived += ApplyRemoteCharacterPortrait; // [NEW]
+            FusionManager.Instance.PlayerFrameReceived += ApplyRemoteFrameUI; // [NEW]
         }
 
         EnsureBotController();
@@ -543,15 +544,36 @@ public partial class GameController : MonoBehaviour
                 }
                 players[i].SetupPlayer(finalName);
 
-                // --- ใส่กรอบชื่อจากร้านค้า (เฉพาะผู้เล่นจริง local) ---
+                // --- ใส่กรอบชื่อจากร้านค้า ---
                 bool isLocalSeat = !isOnlineMatchMode
                     ? i == 0
                     : i == localPlayerSlotIndex;
+                    
                 if (isLocalSeat && !players[i].isBot)
                 {
                     Sprite frameSprite = ShopManager.LoadEquippedFrameSprite();
-                    // สีกรอบดึงจาก ShopItemData ถ้าหาสีตรงได้ หรือใช้ White เป็น default
                     players[i].ApplyNameFrame(frameSprite, Color.white);
+                }
+                else if (isOnlineMatchMode && !players[i].isBot && FusionManager.Instance != null)
+                {
+                    // ลองดึงกรอบของผู้เล่นอื่นที่เคยโหลดไว้แล้วมาใส่
+                    int remotePlayerId = FusionManager.Instance.GetPlayerIdForSeatIndex(i);
+                    if (remotePlayerId >= 0 && FusionManager.Instance.TryGetPlayerFrame(remotePlayerId, out string frameId) && !string.IsNullOrEmpty(frameId) && frameId != ShopManager.DEFAULT_FRAME)
+                    {
+                        Sprite frameSprite = Resources.Load<Sprite>($"Frames/{frameId}");
+                        if (frameSprite != null)
+                        {
+                            players[i].ApplyNameFrame(frameSprite, Color.white);
+                        }
+                        else
+                        {
+                            players[i].HideNameFrame();
+                        }
+                    }
+                    else
+                    {
+                        players[i].HideNameFrame();
+                    }
                 }
                 else
                 {

@@ -259,6 +259,41 @@ public partial class GameController
         }
     }
 
+    // [NEW] รับ event PlayerFrameReceived (playerId, frameId) จาก FusionManager
+    private void ApplyRemoteFrameUI(int playerId, string frameId)
+    {
+        if (!isOnlineMatchMode || players == null)
+        {
+            return;
+        }
+
+        if (FusionManager.Instance == null) return;
+
+        int seatIndex = FusionManager.Instance.GetSeatIndexForPlayerId(playerId);
+        if (seatIndex < 0 || seatIndex >= players.Length || players[seatIndex] == null)
+        {
+            GameLog.Log($"[GameController] ApplyRemoteFrameUI: seatIndex={seatIndex} invalid for playerId={playerId}");
+            return;
+        }
+
+        Sprite frameSprite = null;
+        if (!string.IsNullOrEmpty(frameId) && frameId != ShopManager.DEFAULT_FRAME)
+        {
+            frameSprite = Resources.Load<Sprite>($"Frames/{frameId}");
+        }
+
+        if (frameSprite != null)
+        {
+            players[seatIndex].ApplyNameFrame(frameSprite, Color.white);
+            GameLog.Log($"[GameController] Set frame {frameId} for seat {seatIndex} (playerId={playerId})");
+        }
+        else
+        {
+            players[seatIndex].HideNameFrame();
+            GameLog.Log($"[GameController] Hide frame for seat {seatIndex} (playerId={playerId})");
+        }
+    }
+
 
     private string GetOnlinePlayerDisplayNameForSeat(int seatIndex)
     {
