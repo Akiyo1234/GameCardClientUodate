@@ -230,6 +230,36 @@ public partial class GameController
         }
     }
 
+    // [NEW] รับ event PlayerCharacterReceived (playerId, characterIndex) จาก FusionManager
+    // แล้วอัปเดต characterPortrait ของ seat ที่ตรงกับ playerId นั้น
+    private void ApplyRemoteCharacterPortrait(int playerId, int characterIndex)
+    {
+        if (!isOnlineMatchMode || players == null || availableCharacters == null || availableCharacters.Length == 0)
+        {
+            return;
+        }
+
+        if (FusionManager.Instance == null) return;
+
+        // หา seatIndex จาก playerId
+        int seatIndex = FusionManager.Instance.GetSeatIndexForPlayerId(playerId);
+        if (seatIndex < 0 || seatIndex >= players.Length || players[seatIndex] == null)
+        {
+            GameLog.Log($"[GameController] ApplyRemoteCharacterPortrait: seatIndex={seatIndex} invalid for playerId={playerId}");
+            return;
+        }
+
+        int clampedIndex = Mathf.Clamp(characterIndex, 0, availableCharacters.Length - 1);
+        CharacterData charData = availableCharacters[clampedIndex];
+
+        if (players[seatIndex].characterPortrait != null && charData.portraitSprite != null)
+        {
+            players[seatIndex].characterPortrait.sprite = charData.portraitSprite;
+            GameLog.Log($"[GameController] Set avatar for seat {seatIndex} (playerId={playerId}) → {charData.characterName}");
+        }
+    }
+
+
     private string GetOnlinePlayerDisplayNameForSeat(int seatIndex)
     {
         if (FusionManager.Instance == null)
@@ -736,7 +766,34 @@ public partial class GameController
         rectTransform.localScale = layout.LocalScale;
         rectTransform.localRotation = layout.LocalRotation;
         rectTransform.SetSiblingIndex(layout.SiblingIndex);
+
+        // [FIX] ปรับตำแหน่ง reservedAreaTransform ให้อยู่ด้านล่าง Panel เสมอ
+        // Player Panel ที่อยู่ด้านบนหน้าจอ (anchorMin.y >= 0.5) จะต้อง flip กรอบจองการ์ดลงล่าง
+        if (player.reservedAreaTransform != null && player.reservedAreaTransform.TryGetComponent(out RectTransform reservedRT))
+        {
+            bool isPanelOnTop = layout.AnchorMin.y >= 0.5f;
+
+            if (isPanelOnTop)
+            {
+                // Panel อยู่ด้านบน → ย้ายกรอบจองการ์ดลงด้านล่างของ Panel
+                reservedRT.anchorMin = new UnityEngine.Vector2(reservedRT.anchorMin.x, 0f);
+                reservedRT.anchorMax = new UnityEngine.Vector2(reservedRT.anchorMax.x, 0f);
+                // Pivot ไว้ด้านบนของ element → element จะห้อยลงจาก anchor
+                reservedRT.pivot = new UnityEngine.Vector2(0.5f, 1f);
+                // anchoredPosition.y เป็น 0 = ติดกับขอบล่างของ Panel พอดี
+                reservedRT.anchoredPosition = new UnityEngine.Vector2(reservedRT.anchoredPosition.x, 0f);
+            }
+            else
+            {
+                // Panel อยู่ด้านล่าง → กรอบจองการ์ดอยู่ด้านบนของ Panel (layout ปกติ)
+                reservedRT.anchorMin = new UnityEngine.Vector2(reservedRT.anchorMin.x, 1f);
+                reservedRT.anchorMax = new UnityEngine.Vector2(reservedRT.anchorMax.x, 1f);
+                reservedRT.pivot = new UnityEngine.Vector2(0.5f, 0f);
+                reservedRT.anchoredPosition = new UnityEngine.Vector2(reservedRT.anchoredPosition.x, 0f);
+            }
+        }
     }
+
 
     // ───────── Online room helpers ─────────
 
