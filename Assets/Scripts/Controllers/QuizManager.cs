@@ -342,12 +342,6 @@ public class QuizManager : MonoBehaviour
             return;
         }
 
-        if (isWaitingForOnlineResults && !IsOnlineQuizHost())
-        {
-            if (timerText != null) timerText.text = "WAIT";
-            return;
-        }
-
         currentTime -= Time.deltaTime;
         if (timerText != null) timerText.text = Mathf.Max(0, Mathf.CeilToInt(currentTime)).ToString();
         if (timeBarFill != null) timeBarFill.fillAmount = Mathf.Clamp01(currentTime / timeLimit);
@@ -356,13 +350,20 @@ public class QuizManager : MonoBehaviour
         if (currentSecond != lastSecondTicked && currentSecond >= 0)
         {
             lastSecondTicked = currentSecond;
-            if (!isWaitingForOnlineResults) 
+            if (!isWaitingForOnlineResults)
             {
                 PlayTimerSound();
             }
         }
 
         if (currentTime > 0f)
+        {
+            return;
+        }
+
+        // client (ไม่ใช่ host) ที่ตอบแล้ว/หมดเวลาแล้ว: เลขนับถอยหลังลงจนครบแล้วค้างที่ 0 รอผลจาก Host
+        // ไม่จบควิซเอง (Host เป็นผู้ตัดสินเวลาจบ) — กันโชว์ "WAIT" แช่ และกัน client จบควิซก่อน Host
+        if (isWaitingForOnlineResults && !IsOnlineQuizHost())
         {
             return;
         }
@@ -858,7 +859,7 @@ public class QuizManager : MonoBehaviour
     {
         isWaitingForOnlineResults = true;
         DisableAnswerButtons();
-        if (timerText != null) timerText.text = "WAIT";
+        // ไม่ตั้ง timerText เป็น "WAIT" แล้ว — ปล่อยให้ Update โชว์เลขนับถอยหลังต่อจนครบ (ลื่นกว่า ตรงกับที่ผู้เล่นคาดหวัง)
     }
 
     private void HandleOnlineQuizTimeout()

@@ -57,6 +57,9 @@ public partial class GameController : MonoBehaviour
     [HideInInspector] public List<CardData> tier2Cards;
     [HideInInspector] public List<CardData> tier1Cards;
     private HashSet<string> usedCardIds = new HashSet<string>();
+    // base seed สุ่มกระดานประจำแมตช์ (ใช้เฉพาะ online): มาจากชื่อห้อง → ทุกเครื่องในแมตช์ได้ค่าเดียวกัน
+    // ทำให้สุ่มได้กระดานชุดเดียวกันทุกเครื่อง แต่ต่างกันทุกแมตช์ (offline สุ่มผ่าน Random ที่ re-seed ใน Awake แทน)
+    private int boardRandomSeed;
 
     [Header("---- Player Management ----")]
     public PlayerUI[] players;
@@ -189,6 +192,19 @@ public partial class GameController : MonoBehaviour
 
         // โหลดข้อมูลการ์ดจาก JSON อัตโนมัติ
         LoadCardDatabase();
+
+        // สุ่มกระดานให้ไม่ซ้ำเดิมทุกเกม:
+        //   • online : base seed มาจากชื่อห้อง (Photon session) → ทุกเครื่องในแมตช์ได้ค่าเดียวกันตั้งแต่ Awake
+        //              จึง pre-populate การ์ดตรงกัน (ไม่กระพริบ) แต่ต่างกันทุกแมตช์
+        //   • offline: re-seed Random ใหม่ทุกเกม → กระดานต่างกันทุกเกม (แม้เล่นหลายเกมในรันเดียว)
+        if (isOnlineMatchMode)
+        {
+            boardRandomSeed = GetOnlineBoardSeed();
+        }
+        else
+        {
+            Random.InitState(System.Environment.TickCount);
+        }
 
         // Setup กระดานไพ่ (ต้องการ cardPrefab)
         // ทุกคนสุ่มกระดานของตัวเองก่อนเสมอ เพื่อให้เห็นการ์ดทันที (ไม่พึ่ง timing ของ IsMasterClient)
@@ -558,23 +574,31 @@ public partial class GameController : MonoBehaviour
         nobleManager?.CheckClaim(p1);
     }
 
-    // [NEW] ฟังก์ชันสำหรับใช้เทสเพิ่มคะแนนให้ Player 1 ทีละ 10 คะแนน
+    // [CHEAT] ปุ่มโกง (เดิม "เพิ่มคะแนน" → เปลี่ยนเป็น "ลดราคาการ์ด"): กดแล้วการ์ดทุกใบบนกระดานเป็นฟรี
+    //   หมายเหตุ: ตัวเลขราคาบนการ์ดฝังในรูป (sprite) จึงไม่เปลี่ยนตามภาพ แต่ "ราคาซื้อจริง" เป็น 0 แล้ว
+    //   (มิวเทต CardData ที่แชร์กัน → ถ้าเริ่มเกมใหม่ในรันเดียว การ์ดใบเดิมอาจยังถูกอยู่; รีสตาร์ทแอปคืนค่าปกติ)
+    //   ชื่อเมธอดคงเดิมเพื่อให้ OnClick ของปุ่มยังผูกอยู่ (ไม่ต้องแก้ไฟล์ซีน)
     public void TestAddScoreToPlayer1()
     {
-        if (players.Length == 0 || players[0] == null) return;
+        int freedCards = 0;
+        FreeBoardCardCosts(tier1Container, ref freedCards);
+        FreeBoardCardCosts(tier2Container, ref freedCards);
+        FreeBoardCardCosts(tier3Container, ref freedCards);
 
-        players[0].currentScore += 10;
-        if (players[0].scoreText != null) 
+        ShowWarning($"[โกง] ลดราคาการ์ดบนกระดานเป็นฟรีแล้ว ({freedCards} ใบ)");
+        GameLog.Log($"[Cheat] ลดราคาการ์ดบนกระดานเป็นฟรี ({freedCards} ใบ)");
+    }
+
+    // ตั้งราคาการ์ดทุกใบใน container เป็น 0 (ใช้โดยปุ่มโกงลดราคา)
+    private void FreeBoardCardCosts(Transform container, ref int count)
+    {
+        if (container == null) return;
+        foreach (Transform child in container)
         {
-            players[0].scoreText.text = players[0].currentScore.ToString();
-        }
-
-        GameLog.Log($"[Test] เพิ่มคะแนน 10 แต้มให้ Player 1. คะแนนรวม: {players[0].currentScore}");
-
-        // อัปเดต Economy ให้ Host/Client ตรงกันถ้าเป็นโหมดออนไลน์
-        if (isOnlineMatchMode)
-        {
-            PublishOnlineEconomyState();
+            CardDisplay cd = child.GetComponent<CardDisplay>();
+            if (cd == null || cd.data == null || cd.data.costs == null) continue;
+            for (int i = 0; i < cd.data.costs.Length; i++) cd.data.costs[i] = 0;
+            count++;
         }
     }
 

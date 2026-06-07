@@ -310,17 +310,27 @@ public partial class GameController
             return;
         }
 
-        // [FIX] Synchronized Seed: ทุกเครื่องใช้ seed เดียวกัน → สุ่มได้การ์ดใบเดียวกันเสมอ
-        // seed = จำนวนการ์ดที่ถูกใช้ไปแล้ว (usedCardIds.Count) คูณด้วย tier offset
-        // ค่านี้จะตรงกันทุกเครื่องเพราะ usedCardIds ถูก sync ผ่าน BoardState snapshot
-        int deterministicSeed = (usedCardIds.Count * 1000) + (tier * 97) + totalTurnCount;
-        Random.State originalState = Random.state;
-        Random.InitState(deterministicSeed);
+        // เลือกการ์ด 1 ใบจาก "กองของ tier นี้เท่านั้น" (availableCards มาจาก masterDeck ของ tier) → สุ่มในเทียร์ตัวเองเสมอ
+        CardData selectedCard;
+        if (isOnlineMatchMode)
+        {
+            // [Online] Synchronized Seed: ทุกเครื่องใช้ seed เดียวกัน → สุ่มได้การ์ดใบเดียวกันตอน pre-populate
+            // boardRandomSeed (มาจากชื่อห้อง) = ฐานสุ่มประจำแมตช์ → ต่างกันทุกแมตช์ แต่ตรงกันทุกเครื่อง
+            // ส่วนที่เหลืออิงจำนวนการ์ดที่ใช้ไปแล้ว/tier/เทิร์น ซึ่ง sync ผ่าน BoardState snapshot (host reconcile ตามมา)
+            int deterministicSeed = boardRandomSeed + (usedCardIds.Count * 1000) + (tier * 97) + totalTurnCount;
+            Random.State originalState = Random.state;
+            Random.InitState(deterministicSeed);
 
-        CardData selectedCard = availableCards[Random.Range(0, availableCards.Count)];
+            selectedCard = availableCards[Random.Range(0, availableCards.Count)];
 
-        // คืนค่า Random state เดิมเพื่อไม่ให้กระทบการสุ่มอื่นๆ ในเกม
-        Random.state = originalState;
+            // คืนค่า Random state เดิมเพื่อไม่ให้กระทบการสุ่มอื่นๆ ในเกม
+            Random.state = originalState;
+        }
+        else
+        {
+            // [Offline] สุ่มจริงจากกองของ tier นี้ → กระดานต่างกันทุกเกม (Random ถูก re-seed ใน Awake)
+            selectedCard = availableCards[Random.Range(0, availableCards.Count)];
+        }
 
         usedCardIds.Add(selectedCard.cardId); // บันทึกว่าใบนี้ถูกใช้แล้ว
         GameObject newCardObj = Instantiate(cardPrefab, container);
@@ -343,6 +353,25 @@ public partial class GameController
         GameLog.Log($"[GameController] โหลดการ์ดจาก JSON สำเร็จ! T1:{tier1Cards.Count} T2:{tier2Cards.Count} T3:{tier3Cards.Count}");
     }
 
+    /// <summary>
+    /// base seed สุ่มกระดานสำหรับโหมดออนไลน์ — derive จากชื่อห้อง (Photon session)
+    /// ทุกเครื่องในแมตช์เดียวกันได้ค่าเท่ากัน (กระดานตรงกัน) แต่คนละแมตช์ได้คนละค่า (กระดานไม่ซ้ำ)
+    /// ใช้ hash แบบ deterministic เอง — ห้ามใช้ string.GetHashCode() เพราะ .NET สุ่มค่าต่างกันข้าม process/เครื่อง → จะ desync
+    /// fallback = 0 ถ้ายังไม่มีชื่อห้อง (พฤติกรรมเดิม; BoardState snapshot reconcile ให้ตรงกันอยู่ดี)
+    /// </summary>
+    private int GetOnlineBoardSeed()
+    {
+        string sessionName = FusionManager.Instance != null ? FusionManager.Instance.CurrentSessionName : null;
+        if (string.IsNullOrEmpty(sessionName)) return 0;
+
+        unchecked
+        {
+            int hash = 17;
+            foreach (char c in sessionName) hash = (hash * 31) + c;
+            return hash & 0x7fffffff; // บังคับเป็นค่าบวก (กัน seed ติดลบ)
+        }
+    }
+
     // วาง "ช่องว่าง" (placeholder มองไม่เห็น กดไม่ได้) เพื่อรักษาตำแหน่ง slot ตอนกองการ์ดหมด
     // → การ์ดที่เหลือไม่เลื่อน และ board snapshot ยังเก็บตำแหน่งช่องว่างได้ (data == null → string.Empty)
     GameObject SpawnEmptyCardSlot(Transform container, int slotIndex = -1)
@@ -356,9 +385,14 @@ public partial class GameController
         CardDisplay cd = slot.GetComponent<CardDisplay>();
         if (cd != null) cd.data = null;
 
-        // ซ่อนรูป + ให้กดทะลุ (ไม่บังการกดอย่างอื่น)
-        UnityEngine.UI.Image img = slot.GetComponent<UnityEngine.UI.Image>();
-        if (img != null) { img.enabled = false; img.raycastTarget = false; }
+        // ซ่อนทั้งใบแต่ "คงขนาดช่องไว้" ให้ HorizontalLayoutGroup → การ์ดที่เหลือไม่เลื่อน/ไม่ชนกัน
+        // ใช้ CanvasGroup (alpha 0) แทนการปิด Image.enabled เพราะ Image ที่ถูก disable จะไม่ contribute layout size
+        //   (ChildControlWidth อาจยุบช่องเหลือ 0) — CanvasGroup ซ่อนทุก graphic ในตัว + กันคลิกทะลุทั้งใบ โดยไม่แตะ layout
+        CanvasGroup cg = slot.GetComponent<CanvasGroup>();
+        if (cg == null) cg = slot.AddComponent<CanvasGroup>();
+        cg.alpha = 0f;
+        cg.blocksRaycasts = false; // กันคลิก/กดค้าง (คุม CardDisplay + CardLongPress ในตัว)
+        cg.interactable = false;
 
         if (slotIndex >= 0) slot.transform.SetSiblingIndex(slotIndex);
         return slot;

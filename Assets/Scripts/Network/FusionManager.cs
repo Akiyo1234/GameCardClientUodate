@@ -125,6 +125,8 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     public bool IsMasterClient => _runner != null && _runner.IsServer;
     public NetworkRunner Runner => _runner;
     public int ActivePlayerCount => _runner == null ? 0 : _runner.ActivePlayers.Count();
+    // ชื่อห้อง/เซสชัน Photon — เท่ากันทุกเครื่องในแมตช์เดียวกัน (ใช้ทำ seed สุ่มกระดานให้ตรงกันข้ามเครื่อง)
+    public string CurrentSessionName => _runner != null && _runner.SessionInfo != null ? _runner.SessionInfo.Name : null;
 
     // =============================================================================
     // StartMatchedGame — เริ่มเกมหลัง Matchmaking

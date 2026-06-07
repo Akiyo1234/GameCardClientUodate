@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>เอกสารเตรียมพรีเซนต์ — เกมการ์ดเสริมสร้างแนวคิดระบบสารสนเทศ</title>
+<style>
+  :root {
+    --ink:#1f2933; --muted:#52606d; --line:#e4e7eb; --bg:#ffffff;
+    --accent:#2563eb; --accent2:#1e40af; --warn-bg:#fff7ed; --warn-bd:#f59e0b;
+    --tip-bg:#eff6ff; --code-bg:#f3f4f6; --th:#eef2ff;
+  }
+  * { box-sizing:border-box; }
+  body {
+    font-family:"Sarabun","Leelawadee UI","Tahoma","Segoe UI",sans-serif;
+    color:var(--ink); background:#f6f7f9; margin:0; line-height:1.7;
+    -webkit-text-size-adjust:100%;
+  }
+  .wrap { max-width:860px; margin:0 auto; background:var(--bg);
+           padding:28px 22px 80px; box-shadow:0 0 0 1px var(--line); }
+  h1 { font-size:1.6rem; line-height:1.35; margin:.2em 0 .1em;
+        border-bottom:3px solid var(--accent); padding-bottom:.35em; color:var(--accent2); }
+  h2 { font-size:1.28rem; margin:1.8em 0 .5em; padding:.35em .6em;
+        background:linear-gradient(90deg,var(--th),transparent); border-left:5px solid var(--accent);
+        border-radius:4px; }
+  h3 { font-size:1.08rem; margin:1.4em 0 .4em; color:var(--accent2); }
+  h4 { font-size:1rem; margin:1.1em 0 .3em; color:var(--muted); }
+  p, li { font-size:1rem; }
+  a { color:var(--accent); }
+  hr { border:0; border-top:1px dashed var(--line); margin:2em 0; }
+  code { background:var(--code-bg); padding:.12em .4em; border-radius:5px;
+          font-family:"Cascadia Code","Consolas",monospace; font-size:.9em; }
+  pre { background:#0f172a; color:#e2e8f0; padding:14px 16px; border-radius:10px;
+         overflow:auto; font-size:.82rem; line-height:1.5; }
+  pre code { background:transparent; color:inherit; padding:0; }
+  blockquote { margin:1em 0; padding:.8em 1em; background:var(--tip-bg);
+                border-left:5px solid var(--accent); border-radius:6px; color:#1e3a5f; }
+  blockquote p { margin:.3em 0; }
+  table { border-collapse:collapse; width:100%; margin:1em 0; font-size:.93rem;
+           display:block; overflow-x:auto; }
+  th, td { border:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top; }
+  th { background:var(--th); font-weight:700; white-space:nowrap; }
+  tr:nth-child(even) td { background:#fafbfc; }
+  ul, ol { padding-left:1.4em; }
+  li { margin:.25em 0; }
+  strong { color:var(--accent2); }
+  /* callout เน้นหัวข้อ ⚠️ */
+  h2:has(+ p), h2 { }
+  .topbar { position:sticky; top:0; background:var(--accent2); color:#fff;
+             font-size:.8rem; padding:6px 12px; text-align:center; letter-spacing:.02em; z-index:5; }
+  @media (max-width:600px){
+    .wrap{ padding:16px 12px 60px; }
+    h1{ font-size:1.35rem; } h2{ font-size:1.12rem; }
+    body{ line-height:1.65; }
+  }
+  @media print {
+    body{ background:#fff; } .topbar{ display:none; }
+    .wrap{ box-shadow:none; max-width:100%; padding:0; }
+    h2{ break-after:avoid; } table, pre, blockquote{ break-inside:avoid; }
+    a{ color:var(--ink); text-decoration:none; }
+  }
+</style>
+</head>
+<body>
+<div class="topbar">📱 เปิดอ่านบนมือถือได้ • กด Print → Save as PDF เพื่อเก็บไว้อ่านออฟไลน์</div>
+<div class="wrap">
+<h1 id="_1">📋 เอกสารเตรียมนำเสนอโครงงาน (ฉบับอ่านก่อนสอบ)</h1>
+<h3 id="startup-city-the-great-hackathon">เกมการ์ดเสริมสร้างแนวคิดระบบสารสนเทศ — <em>Startup City / The Great Hackathon</em></h3>
+<blockquote>
+<p><strong>วิธีใช้เอกสารนี้:</strong> อ่านจากบนลงล่างได้เลย ส่วนที่สำคัญที่สุด 3 ส่วนคือ
+1. <strong>ส่วนที่ 1 (ตัวเลขที่ต้องจำ)</strong> — ท่องให้ขึ้นใจ อาจารย์ชอบถามตัวเลข
+2. <strong>ส่วนที่ 7 (คลังคำถาม-คำตอบ)</strong> — ซ้อมตอบให้คล่อง นี่คือหัวใจของการสอบ
+3. <strong>ส่วนที่ 8 (จุดที่เอกสารกับโค้ดไม่ตรงกัน)</strong> — ⚠️ ต้องรีบแก้ก่อนสอบ ไม่งั้นโดนจับผิด</p>
+<p>เอกสารนี้สรุปจาก "โค้ดจริง" ในโปรเจค ไม่ใช่แค่จากเล่ม ดังนั้นเชื่อถือได้ว่าตรงกับของที่รันจริง</p>
+</blockquote>
+<hr />
+<h2 id="0-1">🎯 ส่วนที่ 0 — สรุป 1 นาที (พูดได้ทันทีถ้าอาจารย์บอก "เล่าโปรเจคให้ฟังหน่อย")</h2>
+<blockquote>
+<p>"โครงงานนี้คือ <strong>เกมการ์ดดิจิทัลเชิงการศึกษาบนมือถือ</strong> ที่นำกลไกการบริหารทรัพยากรของบอร์ดเกม <strong>Splendor</strong> มาประยุกต์ใหม่ให้เป็นการจัดการ <strong>ทรัพยากรระบบคอมพิวเตอร์ 5 อย่าง</strong> คือ CPU, RAM, Network, Storage และ Security ผู้เล่นสวมบทเป็นนักพัฒนาระบบ ใช้ทรัพยากรเหล่านี้ไปสร้าง 'การ์ดโมดูลซอฟต์แวร์' 3 ระดับ เพื่อสะสมแต้ม (Stars) ให้ครบ <strong>20 แต้มเป็นคนแรก</strong></p>
+<p>จุดที่ทำให้เป็น 'สื่อการเรียนรู้' ไม่ใช่แค่เกม คือมี <strong>ควิซความรู้คอมพิวเตอร์แทรกระหว่างเล่น</strong> เพื่อชิงสิทธิ์ลำดับการเดินในรอบถัดไป</p>
+<p>ในเชิงเทคนิค ผมพัฒนาเป็นระบบ <strong>Full-Stack</strong> จริง: ตัวเกมทำด้วย <strong>Unity (C#)</strong>, เล่นออนไลน์ 2–4 คนแบบเรียลไทม์ด้วย <strong>Photon Fusion</strong>, มีโหมดเล่นคนเดียวสู้กับ <strong>บอท AI แบบ Rule-Based</strong>, และเชื่อมหลังบ้านคลาวด์ <strong>Supabase (PostgreSQL)</strong> สำหรับสมัครสมาชิก ระบบจับคู่อัตโนมัติ คะแนนอันดับ MMR และร้านค้า"</p>
+</blockquote>
+<p><strong>(พูดประมาณนี้ ~45 วินาที — จำ flow: เกมอะไร → สอนอะไร → ทำด้วยอะไร)</strong></p>
+<hr />
+<h2 id="1-cheat-sheet">🔢 ส่วนที่ 1 — ตัวเลข &amp; ข้อเท็จจริงที่ต้องจำขึ้นใจ (Cheat Sheet)</h2>
+<table>
+<thead>
+<tr>
+<th>หัวข้อ</th>
+<th>ค่า</th>
+<th>หมายเหตุ</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>เป้าหมายชนะ</strong></td>
+<td>20 แต้ม (Stars)</td>
+<td>คนแรกที่ถึงเป็นผู้ชนะ</td>
+</tr>
+<tr>
+<td><strong>ทรัพยากร</strong></td>
+<td>5 ชนิด</td>
+<td>CPU, RAM, Network, Storage, Security</td>
+</tr>
+<tr>
+<td><strong>เหรียญพิเศษ</strong></td>
+<td>Gold / Wildcard</td>
+<td>ใช้แทนสีใดก็ได้ ได้จาก "การจองการ์ด" เท่านั้น</td>
+</tr>
+<tr>
+<td><strong>ระดับการ์ด</strong></td>
+<td>3 Tiers</td>
+<td>T1: 0–1 แต้ม / T2: 1–3 แต้ม / T3: 3–5 แต้ม</td>
+</tr>
+<tr>
+<td><strong>ขุนนาง (Nobles)</strong></td>
+<td>8 ใบ</td>
+<td>ได้อัตโนมัติเมื่อมีโบนัสการ์ดครบเงื่อนไข (ให้แต้มเพิ่ม)</td>
+</tr>
+<tr>
+<td><strong>แอคชั่นต่อเทิร์น</strong></td>
+<td>เลือก 1 จาก 3</td>
+<td>หยิบเหรียญ / ซื้อการ์ด / จองการ์ด</td>
+</tr>
+<tr>
+<td><strong>เพดานถือเหรียญ</strong></td>
+<td>10 เหรียญ</td>
+<td>เกินไม่ได้ ต้องซื้อการ์ดเพื่อใช้เหรียญก่อน</td>
+</tr>
+<tr>
+<td><strong>จองการ์ดได้สูงสุด</strong></td>
+<td>3 ใบ</td>
+<td>ได้ Wildcard +1 ต่อการจอง</td>
+</tr>
+<tr>
+<td><strong>เหรียญในกองกลาง</strong></td>
+<td>2 คน=4, 3 คน=5, 4 คน=7 ต่อสี</td>
+<td>Gold = 5 เสมอ</td>
+</tr>
+<tr>
+<td><strong>กฎหยิบเหรียญ</strong></td>
+<td>3 สีต่างกัน <em>หรือ</em> 2 สีเดียวกัน</td>
+<td>หยิบ 2 สีเดียวได้เมื่อกองนั้นเหลือ ≥ 4</td>
+</tr>
+<tr>
+<td><strong>เวลาต่อเทิร์น</strong></td>
+<td>30 วินาที</td>
+<td>หมดเวลา = บังคับข้ามเทิร์น</td>
+</tr>
+<tr>
+<td><strong>เวลาตอบควิซ</strong></td>
+<td>10 วินาที</td>
+<td>⚠️ เล่ม 3.5 เขียน 20 วิ — ดูส่วนที่ 8</td>
+</tr>
+<tr>
+<td><strong>ควิซแทรกทุกๆ</strong></td>
+<td>⚠️ <strong>โค้ดจริง = 5 รอบ</strong></td>
+<td>เล่มเขียน 3 รอบ — ต้องแก้ ดูส่วนที่ 8</td>
+</tr>
+<tr>
+<td><strong>บอทตอบควิซถูก</strong></td>
+<td>สุ่ม 40–80%</td>
+<td>⚠️ เล่มเขียน 100% — ดูส่วนที่ 8</td>
+</tr>
+<tr>
+<td><strong>ผู้เล่นออนไลน์</strong></td>
+<td>2–4 คน</td>
+<td>Photon Fusion (Shared Mode)</td>
+</tr>
+<tr>
+<td><strong>โหมดบอท</strong></td>
+<td>Rule-Based 4 ลำดับ + 4 บุคลิก</td>
+<td>ไม่ใช่ Machine Learning</td>
+</tr>
+<tr>
+<td><strong>MMR เริ่มต้น</strong></td>
+<td>1000</td>
+<td>สูตรแบบ DOTA2 (ไม่ใช่ Elo)</td>
+</tr>
+<tr>
+<td><strong>รางวัล Gem ตามอันดับ</strong></td>
+<td>1=5, 2=3, 3=2, 4=1</td>
+<td>เพชรเอาไปซื้อกรอบโปรไฟล์</td>
+</tr>
+<tr>
+<td><strong>Daily Quiz</strong></td>
+<td>วันละ 1 ครั้ง, 5 ข้อ</td>
+<td>กันรับซ้ำด้วยตาราง <code>daily_quiz_claims</code></td>
+</tr>
+<tr>
+<td><strong>ตารางฐานข้อมูล</strong></td>
+<td>8 ตาราง</td>
+<td>ดูส่วนที่ 4.6</td>
+</tr>
+<tr>
+<td><strong>ผลประเมินความพึงพอใจ</strong></td>
+<td>4.50 (S.D. 0.54)</td>
+<td>จากผู้ทดลอง 15 คน, Likert 5 ระดับ = "มากที่สุด"</td>
+</tr>
+<tr>
+<td><strong>Engine / เวอร์ชัน</strong></td>
+<td>Unity 6 (6000.x)</td>
+<td>ภาษา C#</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2">🏗️ ส่วนที่ 2 — สถาปัตยกรรมระบบ (อธิบายให้เห็นภาพ)</h2>
+<p>โปรเจคนี้เป็น <strong>3 ชั้น (3-Tier Full-Stack)</strong> — ถ้าอาจารย์ถาม "ระบบทำงานยังไง" ให้วาดภาพนี้</p>
+<pre><code>┌─────────────────────────────────────────────────────────────┐
+│  ชั้นที่ 1: CLIENT (ตัวเกมบนมือถือ/PC)                          │
+│  Unity 6 + C#                                                 │
+│  • แสดงผลกระดาน การ์ด เหรียญ UI                                │
+│  • กติกาเกม (GameController) + บอท AI (BotController)           │
+│  • ระบบควิซ (QuizManager)                                      │
+└───────────────┬──────────────────────────┬──────────────────┘
+                │                          │
+     เล่นออนไลน์ (เรียลไทม์)        สมัคร/ล็อกอิน/สถิติ/ร้านค้า
+                │                          │
+                ▼                          ▼
+┌──────────────────────────┐   ┌──────────────────────────────┐
+│ ชั้นที่ 2: REALTIME NET   │   │ ชั้นที่ 3: BACKEND (คลาวด์)    │
+│ Photon Fusion 2          │   │ Supabase (PostgreSQL)        │
+│ (Shared Mode, UDP)       │   │ • Auth (สมัคร/ล็อกอิน + OTP)  │
+│ • ซิงค์สถานะกระดาน        │   │ • player_profiles (MMR/Gems) │
+│ • ลำดับเทิร์น/ทรัพยากร     │   │ • Matchmaking (จับคู่อัตโนมัติ)│
+│ • ผลควิซ                  │   │ • Edge Functions (server)    │
+└──────────────────────────┘   │ • คลังคำถามควิซ (patch system)│
+                               └──────────────────────────────┘
+</code></pre>
+<p><strong>ประโยคที่ใช้พูดสรุป:</strong></p>
+<blockquote>
+<p>"ตัวเกมคุยกับหลังบ้าน 2 ทาง — เรื่อง <strong>เรียลไทม์ระหว่างเล่น</strong> (สถานะกระดาน, เทิร์น) วิ่งผ่าน <strong>Photon Fusion</strong> บน UDP เพราะต้องการความหน่วงต่ำ ส่วนเรื่อง <strong>ข้อมูลถาวร</strong> (บัญชี, คะแนน, ร้านค้า, ข้อสอบ) วิ่งผ่าน <strong>Supabase</strong> ผมแยก 2 ระบบนี้ตามลักษณะงาน — อะไรที่ต้องเร็วและชั่วคราวใช้ Fusion อะไรที่ต้องเก็บถาวรและเชื่อถือได้ใช้ Supabase"</p>
+</blockquote>
+<hr />
+<h2 id="3">🎲 ส่วนที่ 3 — กลไกเกมแบบละเอียด (กติกาที่ต้องอธิบายได้)</h2>
+<h3 id="31">3.1 ทรัพยากร &amp; เหรียญ</h3>
+<ul>
+<li>เหรียญทรัพยากร 5 สี = <strong>CPU, RAM, Network, Storage, Security</strong></li>
+<li>เหรียญ <strong>Gold (Wildcard)</strong> = แทนสีใดก็ได้ — <strong>ห้ามหยิบตรงๆ</strong> ได้จากการ "จองการ์ด" เท่านั้น</li>
+<li>ถือเหรียญรวมกันได้ไม่เกิน <strong>10 อัน</strong></li>
+</ul>
+<h3 id="32-engine-building">3.2 การ์ดโมดูลซอฟต์แวร์ (Engine-Building)</h3>
+<ul>
+<li>การ์ดแต่ละใบมี <strong>ต้นทุน</strong> (เหรียญที่ต้องจ่าย) และ <strong>แต้ม (Stars)</strong></li>
+<li>ซื้อการ์ดแล้วได้ <strong>โบนัสถาวร 1 สี</strong> = ส่วนลดต้นทุนการ์ดใบต่อๆ ไป (นี่คือหัวใจ "Engine-Building" ของ Splendor — ยิ่งซื้อยิ่งถูกลง)</li>
+<li>มี 3 Tier เรียงจากถูก/แต้มน้อย (T1) ไปแพง/แต้มเยอะ (T3)</li>
+</ul>
+<h3 id="33-1">3.3 แอคชั่นในแต่ละเทิร์น (เลือกได้ 1 อย่าง)</h3>
+<ol>
+<li><strong>หยิบเหรียญ (Collect):</strong> 3 สีต่างกัน <em>หรือ</em> 2 สีเดียวกัน (ถ้ากองนั้นเหลือ ≥ 4)</li>
+<li><strong>ซื้อการ์ด (Purchase):</strong> จ่ายเหรียญตามต้นทุน (หักโบนัสที่มีก่อน) → ได้แต้ม + โบนัส</li>
+<li><strong>จองการ์ด (Reserve):</strong> เก็บการ์ดขึ้นมือ(สูงสุด 3 ใบ) + ได้ Gold 1 เหรียญ — ใช้ตัดหน้าคู่แข่ง/ล็อกการ์ดแพง</li>
+</ol>
+<h3 id="34-nobles">3.4 ขุนนาง (Nobles)</h3>
+<ul>
+<li>มี 8 ใบ ระบบ <strong>เช็คให้อัตโนมัติทุกจบเทิร์น</strong> — ถ้าผู้เล่นมีโบนัสการ์ดครบเงื่อนไข ขุนนางจะมาหาเองและให้แต้มเพิ่ม</li>
+</ul>
+<h3 id="35">3.5 เงื่อนไขชนะ</h3>
+<ul>
+<li>ใครถึง <strong>20 แต้ม</strong> ก่อน = ชนะ</li>
+<li>⚠️ <strong>จุดที่ต้องระวัง:</strong> เล่ม (Scope 3.4) เขียนว่า "เล่นให้จบรอบนั้นก่อนเพื่อให้ทุกคนเดินเท่ากัน" แต่ <strong>โค้ดจริงจบเกมทันทีที่มีคนถึง 20</strong> — ดูส่วนที่ 8 ข้อ 5</li>
+</ul>
+<h3 id="36">3.6 ควิซแทรก (จุดเด่นด้านการศึกษา)</h3>
+<ul>
+<li>ทุกๆ N รอบ เกมจะหยุดแล้วเด้งคำถามคอมพิวเตอร์ 1 ข้อ (4 ตัวเลือก) ให้ทุกคนตอบพร้อมกัน จับเวลา 10 วินาที</li>
+<li><strong>ตอบถูก + เร็วที่สุด = ได้เดินเป็นคนแรกในรอบถัดไป</strong> (เป็นการเอาความรู้มาแปลงเป็นความได้เปรียบในเกม → จูงใจให้ตั้งใจเรียน)</li>
+</ul>
+<hr />
+<h2 id="4">⚙️ ส่วนที่ 4 — เจาะระบบสำคัญ (เนื้อหาที่ใช้พรีเซนต์ + ตอบคำถามเชิงลึก)</h2>
+<h3 id="41-ai-rule-based">4.1 บอท AI แบบ Rule-Based (โหมดเล่นคนเดียว) ⭐ จุดขาย</h3>
+<p>บอท <strong>ไม่ใช่ Machine Learning</strong> แต่เป็น <strong>ระบบตรรกะเชิงกฎเกณฑ์ (Rule-Based) ที่มีลำดับการตัดสินใจ 4 ขั้น</strong> ทุกเทิร์นบอทจะไล่เช็คตามลำดับนี้ เจออันไหนทำได้ก่อนทำเลย:</p>
+<table>
+<thead>
+<tr>
+<th>ลำดับ</th>
+<th>เงื่อนไข</th>
+<th>การกระทำ</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>1. ปิดเกม</strong></td>
+<td>มีการ์ดที่ซื้อแล้วทำให้แต้มรวม ≥ 20</td>
+<td>ซื้อทันที (ชนะ)</td>
+</tr>
+<tr>
+<td><strong>2. ซื้อใบที่คุ้มสุด</strong></td>
+<td>มีการ์ดที่ซื้อไหว</td>
+<td>ให้คะแนน = <code>แต้ม × น้ำหนัก − ต้นทุน</code> แล้วเลือกใบดีสุด</td>
+</tr>
+<tr>
+<td><strong>3. จองเชิงรุก</strong></td>
+<td>ขาดเหรียญซื้อ T3 อยู่นิดเดียว</td>
+<td>จองล็อกการ์ดไว้ + ได้ Gold</td>
+</tr>
+<tr>
+<td><strong>4. เก็บของ</strong></td>
+<td>ทำ 1–3 ไม่ได้</td>
+<td>หยิบเหรียญสีที่ "ต้องการมากที่สุด" บนกระดาน</td>
+</tr>
+</tbody>
+</table>
+<p><strong>ของเด็ดที่ควรอวด:</strong> บอทมี <strong>4 บุคลิก (Archetype)</strong> คงที่ตามที่นั่ง ทำให้ตัดสินใจต่างกันแม้เจอสถานการณ์เดียวกัน:
+- <strong>Balanced</strong> — มาตรฐาน
+- <strong>Aggressive</strong> — เน้นการ์ดแต้มสูง ไม่ค่อยจอง (น้ำหนักแต้ม ×2.0)
+- <strong>Hoarder</strong> — ชอบจอง/สะสมทอง เลือกการ์ดถูก
+- <strong>Specialist</strong> — โฟกัสเก็บ 2 สีที่ถนัด</p>
+<blockquote>
+<p>มี "ความไม่แน่นอน" (suboptimalChance) ให้บอทบางครั้งเลือกตัวเลือกอันดับรอง → ไม่เล่นซ้ำซากเป็นหุ่นยนต์เกินไป</p>
+</blockquote>
+<p><strong>ทำไมเลือก Rule-Based ไม่ใช่ ML?</strong> → ตอบในส่วนที่ 7 (คำถามฮิต)</p>
+<h3 id="42">4.2 ควิซ &amp; การชิงเทิร์น</h3>
+<ul>
+<li>Host (Master Client) เป็นคนสุ่มคำถามแล้ว <strong>broadcast</strong> ให้ทุกเครื่องเห็นข้อเดียวกัน (กันโกง/กันเห็นไม่ตรงกัน)</li>
+<li>ระบบวัดทั้ง <strong>ความถูก</strong> และ <strong>ความเร็วระดับเสี้ยววินาที</strong> แล้วจัดลำดับเทิร์นใหม่ (<code>ApplyNewTurnOrder</code>)</li>
+<li>ในโหมดเล่นคนเดียว ระบบ <strong>จำลองคำตอบของบอท</strong> (สุ่มถูก 40–80%, สุ่มความเร็ว 1–10 วิ) เพื่อให้มีคู่แข่งชิงเทิร์น</li>
+</ul>
+<h3 id="43-matchmaking-race-condition-db">4.3 Matchmaking + การกัน Race Condition ⭐ จุดขายเชิง DB</h3>
+<ul>
+<li>ผู้เล่นกด "หาคู่" → client ยิงขึ้น <strong>Supabase Edge Function</strong> ชื่อ <code>matchmaking</code> → ฝั่ง server เรียก <strong>Database Function <code>claim_matchmaking_room</code></strong></li>
+<li><strong>ปัญหาที่แก้:</strong> ถ้า 2 คนกดพร้อมกัน อาจถูกจับเข้าคนละห้อง/ห้องซ้ำ (Race Condition)</li>
+<li><strong>วิธีแก้ (พูดให้อาจารย์ฟังได้):</strong>
+  1. ใช้ <strong><code>SELECT ... FOR UPDATE</code></strong> ล็อกแถวคิวระดับธุรกรรม (transaction)
+  2. ใช้ <strong>Unique Partial Index</strong> บน <code>matchmaking_queue(player_id) WHERE status='waiting'</code> → 1 คนมีได้แค่ 1 คิว เป็นไปไม่ได้ที่จะซ้ำ
+  3. client poll สถานะทุก 1.5 วิ จนได้ห้อง แล้วเข้าร่วม Photon session เดียวกัน</li>
+<li>มี timeout กันคิวค้าง (stale) ที่ 300 วินาที</li>
+</ul>
+<h3 id="44-photon-fusion-shared-mode">4.4 การซิงค์สถานะผ่าน Photon Fusion (Shared Mode)</h3>
+<ul>
+<li><strong>Shared Mode</strong> = ไม่มีเซิร์ฟเวอร์กลางตัวเดียว แต่มี <strong>Master Client</strong> ทำหน้าที่เป็น "ผู้ตัดสิน" (authority) เรื่องกระดาน/ควิซ</li>
+<li>Host จะ <strong>broadcast 3 snapshot</strong>: สถานะกระดาน (Board), เศรษฐกิจ/เหรียญ (Economy), ลำดับเทิร์น (Turn)</li>
+<li>⭐ <strong>เทคนิคแก้บั๊กที่เจอจริง (พูดได้เลยว่าเจอปัญหานี้แล้วแก้):</strong> ผู้เล่นที่เข้าห้องช้า (late-joiner) จะ <strong>"ดึง" สถานะเต็มจาก host เอง (<code>RequestFullState</code>)</strong> แทนที่จะรอ host "ส่ง" มา — เพราะตอนเพิ่งเข้า ฉากอาจโหลดไม่เสร็จ ทำให้ broadcast หลุดและเห็นกระดานไม่ตรงกัน → เปลี่ยนจาก <strong>push เป็น pull</strong> เพื่อกัน desync</li>
+<li>ถ้าผู้เล่นหลุดกลางเทิร์น/หมดเวลา → <code>ForceEndTurn()</code> ให้ host บังคับจบเทิร์นแทน ไม่ให้เกมค้าง</li>
+</ul>
+<h3 id="45-anti-cheat">4.5 ความปลอดภัย &amp; Anti-Cheat ⭐ จุดขายที่อาจารย์ชอบ</h3>
+<ul>
+<li><strong>Server-Authoritative:</strong> ตอนจบเกม client ส่งขึ้น DB แค่ <strong>"อันดับที่ได้ + จำนวนผู้เล่น"</strong> เท่านั้น แล้ว <strong>server คำนวณ MMR/Gems เอง</strong> → client <strong>ปลอมค่า MMR/เพชรลง DB ไม่ได้</strong></li>
+<li><strong>RLS (Row Level Security):</strong> ตาราง <code>player_profiles</code> ตั้งให้ client (authenticated) <strong>อ่านได้อย่างเดียว</strong> เขียนได้เฉพาะ <code>service_role</code> ผ่าน Edge Function</li>
+<li><strong>ราคาร้านค้าอยู่ที่ server:</strong> ตาราง <code>shop_items</code> เก็บราคาจริง → client แก้ราคาเองไม่ได้</li>
+<li><strong>OTP ยืนยันอีเมล:</strong> เก็บเป็น <strong>SHA-256 hash ไม่เก็บเลขตรง</strong> มี <code>expires_at</code> (หมดอายุ) และ <code>attempts</code> (จำกัดจำนวนครั้งเดา)</li>
+</ul>
+<h3 id="46-supabase-postgresql-8">4.6 ฐานข้อมูล (Supabase / PostgreSQL) — 8 ตาราง</h3>
+<table>
+<thead>
+<tr>
+<th>ตาราง</th>
+<th>หน้าที่</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>player_profiles</code></td>
+<td>โปรไฟล์หลัก: gems, mmr, wins, losses, กรอบที่มี/ที่ใส่, ตัวละคร (1:1 กับ <code>auth.users</code>)</td>
+</tr>
+<tr>
+<td><code>rooms</code></td>
+<td>ห้องเกมที่จับคู่สร้าง (ผูกกับ Photon session)</td>
+</tr>
+<tr>
+<td><code>matchmaking_queue</code></td>
+<td>คิวจับคู่ออนไลน์ (มี RPC <code>claim_matchmaking_room</code>)</td>
+</tr>
+<tr>
+<td><code>shop_items</code></td>
+<td>ราคาไอเทมร้านค้า (source of truth กันโกงราคา)</td>
+</tr>
+<tr>
+<td><code>daily_quiz_claims</code></td>
+<td>กันรับรางวัลควิซรายวันซ้ำ (1 คน/วัน)</td>
+</tr>
+<tr>
+<td><code>quiz_patches</code></td>
+<td>ชุด/แพ็กข้อสอบ (เปิด-ปิด active ได้)</td>
+</tr>
+<tr>
+<td><code>quiz_questions</code></td>
+<td>คลังคำถาม (โจทย์, 4 ตัวเลือก jsonb, เฉลย) ผูกกับ patch</td>
+</tr>
+<tr>
+<td><code>otp_codes</code></td>
+<td>รหัส OTP ยืนยันอีเมล (เก็บ hash)</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>จุดขาย:</strong> ระบบควิซเป็น <strong>"Patch System"</strong> — เพิ่ม/แก้ข้อสอบในฐานข้อมูลได้ <strong>โดยไม่ต้อง build เกมใหม่</strong> เพราะตัวเกมดึงคำถามจาก patch ที่ active ผ่าน RPC</p>
+</blockquote>
+<h3 id="47-mmr">4.7 ระบบ MMR (จัดอันดับ)</h3>
+<ul>
+<li>เริ่มที่ <strong>1000</strong> สูตรแบบ <strong>DOTA2</strong> (เป็นค่าคงที่ตามอันดับ ไม่ใช่ Elo ที่คิดจากส่วนต่างคะแนนคู่แข่ง)</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>จำนวนผู้เล่น</th>
+<th>อันดับ 1</th>
+<th>2</th>
+<th>3</th>
+<th>4</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2 คน</td>
+<td>+25</td>
+<td>−25</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>3 คน</td>
+<td>+25</td>
+<td>−5</td>
+<td>−20</td>
+<td>—</td>
+</tr>
+<tr>
+<td>4 คน</td>
+<td>+30</td>
+<td>+10</td>
+<td>−10</td>
+<td>−25</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>ยศ: Bronze &lt; Silver(1000) &lt; Gold(1500) &lt; Platinum(2000) &lt; Diamond(2500) &lt; Legend(3000)</li>
+</ul>
+<hr />
+<h2 id="5">💎 ส่วนที่ 5 — จุดขายเชิงเทคนิค (สิ่งที่ทำให้อาจารย์ประทับใจ)</h2>
+<p>ถ้าอาจารย์ถาม "โปรเจคนี้เด่นกว่าการเอาเกม Splendor มาทำใหม่ตรงไหน" ให้ชู 6 ข้อนี้:</p>
+<ol>
+<li><strong>เป็น Full-Stack จริง</strong> — ไม่ได้หยุดที่ตัวเกม แต่มี backend คลาวด์ + ระบบสมาชิก + จัดอันดับ + ร้านค้า ครบวงจร</li>
+<li><strong>Multiplayer เรียลไทม์</strong> ที่จัดการ desync/late-join/ผู้เล่นหลุด ได้จริง (ไม่ใช่แค่ทฤษฎี)</li>
+<li><strong>กัน Race Condition ระดับฐานข้อมูล</strong> ด้วย row-lock + unique partial index</li>
+<li><strong>Server-Authoritative + RLS</strong> กันโกงค่าสถิติและราคา</li>
+<li><strong>บอท AI</strong> ที่มีลำดับการตัดสินใจชัดเจน + บุคลิกหลากหลาย + ความไม่แน่นอนแบบมนุษย์</li>
+<li><strong>บูรณาการการศึกษาเข้ากับกลไกเกม</strong> — ความรู้ = ความได้เปรียบ (ควิซชิงเทิร์น) ไม่ใช่แค่แปะคำถามเฉยๆ</li>
+</ol>
+<hr />
+<h2 id="6">🎤 ส่วนที่ 6 — สคริปต์การนำเสนอ (ลำดับ + เวลาโดยประมาณ)</h2>
+<blockquote>
+<p>ปรับเวลาตามที่อาจารย์กำหนด ตัวอย่างนี้คือ ~12–15 นาที</p>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>นาที</th>
+<th>สไลด์/หัวข้อ</th>
+<th>พูดอะไร / โชว์อะไร</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0:00–1:00</td>
+<td><strong>เปิด + ที่มา</strong></td>
+<td>ปัญหา: เรียน IT ท่องจำน่าเบื่อ → แก้ด้วยเกม + ควิซ (ใช้บท intro)</td>
+</tr>
+<tr>
+<td>1:00–2:00</td>
+<td><strong>วัตถุประสงค์</strong></td>
+<td>3 ข้อ: ทำเกมการศึกษา / ทำบอท Rule-Based / ออกแบบฐานข้อมูล</td>
+</tr>
+<tr>
+<td>2:00–4:00</td>
+<td><strong>กลไกเกม</strong></td>
+<td>โชว์กระดาน: 5 ทรัพยากร, การ์ด 3 tier, 3 แอคชั่น, ถึง 20 แต้มชนะ</td>
+</tr>
+<tr>
+<td>4:00–5:30</td>
+<td><strong>ควิซแทรก (จุดเด่นการศึกษา)</strong></td>
+<td>สาธิตควิซเด้ง → ตอบถูก+เร็ว = ได้เดินก่อน</td>
+</tr>
+<tr>
+<td>5:30–8:00</td>
+<td><strong>สถาปัตยกรรม</strong></td>
+<td>วาดภาพ 3 ชั้น (ส่วนที่ 2) → อธิบายว่าทำไมแยก Fusion กับ Supabase</td>
+</tr>
+<tr>
+<td>8:00–9:30</td>
+<td><strong>บอท AI</strong></td>
+<td>ตาราง 4 ลำดับ + 4 บุคลิก (ส่วนที่ 4.1)</td>
+</tr>
+<tr>
+<td>9:30–11:00</td>
+<td><strong>หลังบ้าน &amp; ความปลอดภัย</strong></td>
+<td>Matchmaking กัน race / server-authoritative / RLS / OTP</td>
+</tr>
+<tr>
+<td>11:00–12:00</td>
+<td><strong>ผลทดสอบ</strong></td>
+<td>ความพึงพอใจ 4.50, ผู้ทดลอง 15 คน</td>
+</tr>
+<tr>
+<td>12:00–13:00</td>
+<td><strong>ข้อจำกัด + อนาคต</strong></td>
+<td>ตอบเชิงรุก (ส่วนที่ 9) ก่อนอาจารย์ถาม</td>
+</tr>
+<tr>
+<td>13:00+</td>
+<td><strong>ถาม-ตอบ</strong></td>
+<td>ใช้ส่วนที่ 7</td>
+</tr>
+</tbody>
+</table>
+<p><strong>เคล็ดลับ:</strong> เตรียม <strong>เดโม่สด</strong> หรือ <strong>คลิปสำรอง</strong> ของ 3 อย่างนี้ให้พร้อม — (1) ซื้อการ์ดได้แต้ม, (2) ควิซเด้งแล้วสลับเทิร์น, (3) จับคู่ออนไลน์ 2 เครื่องเข้าห้องเดียวกัน ถ้าเน็ตมีปัญหาให้เปิดคลิปแทน</p>
+<hr />
+<h2 id="7-">❓ ส่วนที่ 7 — คลังคำถาม-คำตอบ (เตรียมรับมืออาจารย์) ⭐⭐⭐</h2>
+<blockquote>
+<p>นี่คือส่วนสำคัญที่สุด ซ้อมพูดคำตอบให้เป็นธรรมชาติ อย่าท่อง</p>
+</blockquote>
+<h3 id="a-conceptual">กลุ่ม A — แนวคิด / เหตุผล (Conceptual)</h3>
+<p><strong>Q1: ทำไมเลือกเกม Splendor เป็นต้นแบบ?</strong></p>
+<blockquote>
+<p>เพราะกลไกหลักของ Splendor คือ <strong>การบริหารทรัพยากรและการต่อยอด (engine-building)</strong> ซึ่งแมปเข้ากับแนวคิด "การจัดสรรทรัพยากรระบบคอมพิวเตอร์" ได้ตรงมาก — ทรัพยากรมีจำกัด ต้องวางแผนใช้ และการลงทุนช่วงแรกทำให้ช่วงหลังได้เปรียบ (เหมือนโบนัสส่วนลด) อีกทั้งกติกากระชับ เรียนรู้ง่าย เหมาะเป็นสื่อการสอน</p>
+</blockquote>
+<p><strong>Q2: เกมนี้ "สอน" อะไร และวัดผลการเรียนรู้ยังไง?</strong></p>
+<blockquote>
+<p>สอน 2 ชั้น — ชั้นแรกคือ <strong>แนวคิดทรัพยากรระบบ 5 ด้าน</strong> (CPU/RAM/Network/Storage/Security) ผ่านการเล่นซ้ำๆ จนซึมซับ ชั้นที่สองคือ <strong>ความรู้คอมพิวเตอร์เชิงวิชาการ</strong> ผ่านควิซแทรกและ Daily Quiz ส่วนการวัดผล ใช้ <strong>แบบสอบถามความพึงพอใจ (Likert 5 ระดับ) กับผู้ทดลอง 15 คน ได้ค่าเฉลี่ย 4.50</strong> อยู่ในระดับมากที่สุด</p>
+</blockquote>
+<p><strong>Q3: ความใหม่/contribution ของงานคืออะไร ในเมื่อ Splendor มีคนทำดิจิทัลแล้ว?</strong></p>
+<blockquote>
+<p>เกม Splendor ดิจิทัลที่มีอยู่ (เช่น Ephod) เน้นความบันเทิงล้วน <strong>ไม่มีเนื้อหาวิชาการ</strong> งานนี้ต่างตรงที่ (1) <strong>รีธีมเป็นการศึกษา IT</strong> (2) <strong>ฝังควิซเข้าไปในกลไกเกม</strong> ให้ความรู้กลายเป็นความได้เปรียบ (3) ทำเป็น <strong>ระบบ Full-Stack multiplayer + cloud</strong> ที่ใช้งานได้จริง ไม่ใช่ต้นแบบบนกระดาษ</p>
+</blockquote>
+<p><strong>Q4: ทำไมต้องเป็น "เกม" ทำไมไม่ทำแอปสอน/ควิซตรงๆ?</strong></p>
+<blockquote>
+<p>เพราะใช้หลัก <strong>Gamification</strong> — การแข่งขัน, อันดับ MMR, รางวัลเพชร, การปลดล็อกกรอบ สร้าง <strong>แรงจูงใจภายใน</strong> ให้ผู้เรียนกลับมาทบทวนเองโดยสมัครใจ ซึ่งการอ่านตำราเฉยๆ ทำไม่ได้</p>
+</blockquote>
+<h3 id="b-technical-cs">กลุ่ม B — เทคนิค (Technical) — อาจารย์สาย CS จะเจาะตรงนี้</h3>
+<p><strong>Q5: Photon Fusion "Shared Mode" คืออะไร ต่างจาก Host/Server Mode ยังไง ทำไมเลือก?</strong></p>
+<blockquote>
+<p>Shared Mode คือโหมดที่ <strong>ไม่มีเซิร์ฟเวอร์ authority ตัวเดียว</strong> แต่ละ NetworkObject มี "เจ้าของสถานะ" (State Authority) กระจายกัน เหมาะกับเกม session เล็ก ผู้เล่นน้อย และ <strong>ประหยัด</strong> เพราะไม่ต้องรัน dedicated server เอง ผมเลือกเพราะเกมเรา 2–4 คน แต่ผมยังให้ <strong>Master Client ทำหน้าที่เป็นผู้ตัดสิน</strong> เรื่องสุ่มคำถามควิซและสถานะกระดาน เพื่อกันความขัดแย้งของข้อมูล</p>
+</blockquote>
+<p><strong>Q6: ถ้าผู้เล่น 2 คนกดหาคู่พร้อมกันเป๊ะ ระบบกันการจับคู่ผิดยังไง? (Race Condition)</strong></p>
+<blockquote>
+<p>กัน 2 ชั้น — ชั้นแรกที่ระดับฐานข้อมูลใช้ <strong><code>SELECT ... FOR UPDATE</code></strong> ล็อกแถวคิวในธุรกรรม ทำให้ 2 request เข้ามาแก้พร้อมกันไม่ได้ ต้องรอกัน ชั้นที่สองมี <strong>unique partial index</strong> บน <code>player_id</code> เฉพาะแถวที่ <code>status='waiting'</code> ทำให้คนเดียวมีคิวซ้อนไม่ได้เด็ดขาด</p>
+</blockquote>
+<p><strong>Q7: ผู้เล่นโกงคะแนน MMR หรือเพชรได้ไหม?</strong></p>
+<blockquote>
+<p>ไม่ได้ครับ ระบบเป็น <strong>Server-Authoritative</strong> — ตอนจบเกม client ส่งขึ้น server แค่ "อันดับที่จบ + จำนวนผู้เล่น" แล้ว <strong>server คำนวณ MMR/เพชรเองด้วยสูตรเดียวกัน</strong> ที่ใช้โชว์ฝั่ง client นอกจากนี้ตาราง profile ตั้ง <strong>RLS ให้ client เขียนไม่ได้</strong> เขียนได้เฉพาะ Edge Function ฝั่ง server เท่านั้น</p>
+</blockquote>
+<p><strong>Q8: บอทเป็น AI/Machine Learning ไหม?</strong></p>
+<blockquote>
+<p>ไม่ใช่ ML ครับ เป็น <strong>Rule-Based (ระบบกฎเกณฑ์)</strong> ที่มี <strong>ลำดับการตัดสินใจ 4 ขั้น</strong> บวก heuristic ให้คะแนนการ์ด ผมเลือก Rule-Based เพราะ (1) <strong>อธิบายได้ทุกการตัดสินใจ</strong> (explainable) (2) <strong>ไม่ต้อง train ไม่ต้องมี dataset</strong> (3) <strong>เบา รันบนมือถือได้ทันที</strong> และ (4) สำหรับเกมกฎตายตัวแบบนี้ Rule-Based ที่ออกแบบดีก็เล่นเก่งพอท้าทายแล้ว ส่วน ML จะ over-engineer เกินจำเป็น</p>
+</blockquote>
+<p><strong>Q9: แล้วบอททำให้มันไม่น่าเบื่อยังไง ในเมื่อเป็นกฎตายตัว?</strong></p>
+<blockquote>
+<p>ผมเพิ่ม <strong>4 บุคลิก (archetype)</strong> ที่ผูกกับตำแหน่งที่นั่ง ปรับน้ำหนัก/เกณฑ์การตัดสินใจต่างกัน เช่น Aggressive เน้นการ์ดแต้มสูง Hoarder ชอบจองเก็บของ และใส่ <strong>ความน่าจะเป็นที่บอทจะเลือกตัวเลือกอันดับรอง</strong> ทำให้ไม่เล่นเหมือนกันเป๊ะทุกตา ดูเป็นมนุษย์ขึ้น</p>
+</blockquote>
+<p><strong>Q10: ทำไมเลือก Supabase ไม่ใช้ Firebase?</strong></p>
+<blockquote>
+<p>เพราะ Supabase ใช้ <strong>PostgreSQL จริง</strong> ผมจึงเขียน <strong>SQL, RPC function, RLS, transaction</strong> ได้เต็มที่ ซึ่งจำเป็นกับการกัน race condition ในระบบจับคู่ อีกทั้งเป็น open-source และ free tier เพียงพอกับโครงงาน ส่วน Firebase เป็น NoSQL ทำ logic ระดับ transaction/row-lock ได้ยากกว่า</p>
+</blockquote>
+<p><strong>Q11: ข้อมูลกระดานของแต่ละเครื่องเห็นไม่ตรงกันจะทำยังไง?</strong></p>
+<blockquote>
+<p>ผมให้ <strong>Master Client เป็น authority</strong> แล้ว broadcast snapshot ของกระดาน/เหรียญ/เทิร์น และเจอปัญหาจริงว่าคนเข้าห้องช้าจะ "พลาด" broadcast เพราะฉากยังโหลดไม่เสร็จ ผมเลยแก้เป็นให้ client ที่พร้อมแล้ว <strong>"ขอสถานะเต็มจาก host เอง" (pull)</strong> แทนการรอรับ (push) ทำให้ late-joiner sync ตรงเสมอ</p>
+</blockquote>
+<p><strong>Q12: ออกแบบฐานข้อมูลกี่ตาราง มีความสัมพันธ์ยังไง?</strong></p>
+<blockquote>
+<p>8 ตารางหลัก ตัวอย่างความสัมพันธ์: <code>player_profiles</code> ผูก 1:1 กับ <code>auth.users</code>, <code>matchmaking_queue</code> อ้างถึง <code>rooms</code> (FK), <code>quiz_questions</code> อ้างถึง <code>quiz_patches</code> (FK แบบ cascade) ออกแบบให้ข้อมูลถาวร (โปรไฟล์/คะแนน) แยกจากข้อมูลชั่วคราว (คิว/ห้อง) ชัดเจน</p>
+</blockquote>
+<p><strong>Q13: ระบบควิซแก้ข้อสอบต้อง build เกมใหม่ไหม?</strong></p>
+<blockquote>
+<p>ไม่ต้องครับ ผมทำเป็น <strong>Patch System</strong> — คำถามเก็บใน <code>quiz_questions</code> ผูกกับ <code>quiz_patches</code> ตัวเกมดึงเฉพาะ patch ที่ <code>is_active=true</code> ผ่าน RPC ดังนั้นแก้ข้อสอบในฐานข้อมูลแล้วเกมอัปเดตเองทันที (นี่เป็นฐานสำหรับต่อยอดเป็น Instructor Dashboard ในอนาคต)</p>
+</blockquote>
+<h3 id="c-design">กลุ่ม C — การออกแบบ/ความสมดุล (Design)</h3>
+<p><strong>Q14: ทำไมตั้งเป้าหมายที่ 20 แต้ม? ทำไมควิซทุก N รอบ?</strong></p>
+<blockquote>
+<p>เป็นค่าที่ได้จาก <strong>การปรับสมดุล (balancing) จากการทดลองเล่น</strong> ให้เกมจบในเวลาที่กำลังดี ไม่สั้นไม่ยืดเกิน ส่วนความถี่ควิซก็จูนให้แทรกความรู้ได้สม่ำเสมอโดยไม่ขัดจังหวะเกมจนน่ารำคาญ <em>(ดู ⚠️ ส่วนที่ 8 เรื่องตัวเลขควิซในโค้ดก่อนตอบ)</em></p>
+</blockquote>
+<p><strong>Q15: ทำไม MMR ใช้สูตรแบบ DOTA2 ไม่ใช่ Elo?</strong></p>
+<blockquote>
+<p>Elo ออกแบบมาสำหรับ <strong>1v1</strong> และคิดจากส่วนต่างเรตติ้งคู่แข่ง แต่เกมเราเป็น <strong>2–4 คน จัดอันดับ</strong> ผมเลยใช้สูตรแบบให้คะแนน/หักตามอันดับที่จบ (placement-based) แบบ DOTA2 ซึ่งเข้าใจง่ายและเหมาะกับ multiplayer มากกว่า</p>
+</blockquote>
+<h3 id="d-limitations">กลุ่ม D — ข้อจำกัด (Limitations)</h3>
+<p><strong>Q16: จุดอ่อนของระบบคืออะไร?</strong></p>
+<blockquote>
+<p>3 เรื่องหลัก (1) <strong>บอทเป็นกฎตายตัว</strong> ยังไม่ปรับความยากตามฝีมือผู้เล่นอัตโนมัติ (2) <strong>ยังไม่มีหน้าจัดการข้อสอบสำหรับอาจารย์</strong> ต้องแก้ผ่านฐานข้อมูลโดยตรง (3) <strong>ยังไม่มีระบบ chat/emoji</strong> ระหว่างผู้เล่น — ทั้ง 3 ข้อนี้ผมระบุไว้เป็น <strong>งานในอนาคต</strong> แล้ว</p>
+</blockquote>
+<p><strong>Q17: ทดสอบกับผู้ใช้จริงกี่คน เพียงพอไหม?</strong></p>
+<blockquote>
+<p>ทดลองกับนิสิต 15 คน ผ่านแบบสอบถาม Likert 5 ระดับ ได้ค่าเฉลี่ย 4.50 (S.D. 0.54) ซึ่งเพียงพอสำหรับการประเมินเชิงความพึงพอใจในระดับโครงงาน แต่ผมยอมรับว่าถ้าจะวัด <strong>ผลสัมฤทธิ์การเรียนรู้</strong> จริงๆ ควรทำ pre-test/post-test กับกลุ่มตัวอย่างใหญ่ขึ้น ซึ่งเป็นข้อเสนอแนะสำหรับงานต่อไป</p>
+</blockquote>
+<hr />
+<h2 id="8">⚠️ ส่วนที่ 8 — จุดที่เอกสารกับโค้ดไม่ตรงกัน (แก้ก่อนสอบ!) ⭐ สำคัญมาก</h2>
+<p>ผมตรวจโค้ดจริงเทียบกับเล่มเอกสาร เจอ <strong>5 จุดที่ไม่ตรงกัน</strong> ถ้าอาจารย์เปิดโค้ดดูหรือเล่นเกมจริงจะเห็นไม่ตรงกับที่เขียน <strong>แนะนำให้เลือกทางใดทางหนึ่ง: แก้โค้ดให้ตรงเล่ม หรือแก้เล่มให้ตรงโค้ด ก่อนวันสอบ</strong></p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>เรื่อง</th>
+<th>เล่มเขียนว่า</th>
+<th>โค้ดจริงเป็น</th>
+<th>คำแนะนำ</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><strong>ความถี่ควิซ</strong></td>
+<td>ทุก <strong>3 รอบ</strong> (Abstract, 3.6, 7)</td>
+<td><code>quizInterval = 5</code> → ทุก <strong>5 รอบ</strong></td>
+<td>แก้โค้ดเป็น <code>3</code> ง่ายสุด (แก้ 2 บรรทัด)</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>เวลาตอบควิซ</strong></td>
+<td><strong>20 วิ</strong> (Scope 3.5)</td>
+<td><code>timeLimit = 10f</code> → <strong>10 วิ</strong></td>
+<td>แก้เล่ม 3.5 เป็น 10 วิ (บทผล 6.4 ก็เขียน 10 วิอยู่แล้ว)</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>บอทตอบควิซถูก</strong></td>
+<td><strong>100%</strong> (Scope 3.5)</td>
+<td>สุ่ม <strong>40–80%</strong></td>
+<td>แก้เล่มเป็น 40–80% (ดีกว่า เพราะ 100% ผู้เล่นชนะเทิร์นไม่ได้)</td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>จังหวะบอทตอบ</strong></td>
+<td>"5 วิสุดท้าย" (3.5, 7.2)</td>
+<td>สุ่ม <strong>1–10 วิ</strong> ตลอดช่วง</td>
+<td>แก้เล่มเป็น "สุ่มทั้งช่วง" หรือแก้โค้ดให้ตอบช่วงท้าย</td>
+</tr>
+<tr>
+<td>5</td>
+<td><strong>เงื่อนไขจบเกม</strong></td>
+<td>เล่นจบรอบก่อน (ให้เดินเท่ากัน) — Scope 3.4</td>
+<td><strong>จบทันทีที่ถึง 20 แต้ม</strong></td>
+<td>ตัดสินใจ: ถ้าจะคงโค้ด ให้แก้เล่ม 3.4</td>
+</tr>
+</tbody>
+</table>
+<p><strong>รายละเอียดแต่ละจุด (เผื่ออาจารย์ถามเจาะ):</strong></p>
+<ul>
+<li>
+<p><strong>#1 ควิซทุก 5 รอบ:</strong> ไฟล์ <code>GameController.cs</code> ตั้ง <code>quizInterval = 5</code> และ <code>onlineQuizTurnInterval = 5</code> เงื่อนไขใน <code>GameController.Turns.cs</code> คือ <code>(รอบ-1) % 5 == 0</code> → ควิซจะเด้งตอนเริ่มรอบที่ 6, 11, 16 (บวกควิซรอบแรกตอนเปิดเกม) <strong>ถ้าต้องการ "ทุก 3 รอบ" ตามเล่ม เปลี่ยน <code>5</code> เป็น <code>3</code> ทั้งสองตัว</strong></p>
+</li>
+<li>
+<p><strong>#3 + #4 พฤติกรรมบอทควิซ:</strong> อยู่ในฟังก์ชัน <code>SimulateOtherPlayers</code> (<code>QuizManager.cs</code>) — <code>botDifficulty = Random.Range(0.4f, 0.8f)</code> (โอกาสตอบถูก 40–80%) และ <code>botSpeed = Random.Range(1.0f, timeLimit)</code> (ตอบที่วินาทีสุ่ม 1–10) <strong>หมายเหตุ:</strong> บทคัดย่อ (Abstract) เขียนว่า "randomized quiz response delay" ซึ่ง <strong>ตรงกับโค้ด</strong> อยู่แล้ว มีแค่ Scope 3.5 กับ Discussion 7.2 ที่ขัดกัน</p>
+</li>
+<li>
+<p><strong>#5 จบเกมทันที:</strong> <code>CheckWinCondition</code> ถูกเรียก <strong>ทุกจบเทิร์น</strong> ถ้าใครถึง 20 จะ <code>isGameOver = true</code> แล้วจบเลย (มีคอมเมนต์ในโค้ดระบุว่าตั้งใจเปลี่ยนจาก "เช็คตอนจบรอบ" มาเป็น "เช็คทันที") <strong>ถ้าอาจารย์ถามเรื่องความยุติธรรม (คนเดินก่อนได้เปรียบ)</strong> ให้ตอบว่าเป็น first-to-20 ที่จบทันทีเพื่อความชัดเจน หรือจะแก้กลับให้จบรอบตามเล่มก็ได้</p>
+</li>
+</ul>
+<blockquote>
+<p>💡 <strong>ถ้ามีเวลาแก้แค่อย่างเดียว แก้ #1</strong> (เปลี่ยน 5→3) เพราะเป็นตัวเลขที่อาจารย์เห็นง่ายสุดตอนเล่น และแก้ในโค้ดแค่ 2 บรรทัด ส่วน #2–#5 ถ้าไม่ทันแก้ ให้ <strong>จำไว้และตอบตามโค้ดจริง</strong> อย่าตอบตามเล่มที่ผิด</p>
+</blockquote>
+<hr />
+<h2 id="9">🔮 ส่วนที่ 9 — ข้อจำกัด &amp; งานในอนาคต (ตอบเชิงรุกให้ดูโตกว่าคำถาม)</h2>
+<p>พูดเรื่องนี้เองในสไลด์ก่อนอาจารย์ถาม จะดูเป็นมืออาชีพ (ดึงจาก Discussion 7.4):</p>
+<ol>
+<li><strong>Dynamic Difficulty</strong> — ทำให้บอทปรับความเก่งตามฝีมือผู้เล่นอัตโนมัติ</li>
+<li><strong>Instructor Dashboard</strong> — หน้าเว็บให้อาจารย์จัดการคลังข้อสอบเองผ่านคลาวด์ (ต่อยอดจาก patch system ที่มีอยู่แล้ว)</li>
+<li><strong>ระบบโต้ตอบทางสังคม</strong> — Preset Emoji / ข้อความสำเร็จรูป ในห้องรอและระหว่างเล่น</li>
+<li><strong>(เสริมได้)</strong> วัดผลการเรียนรู้ด้วย pre-test/post-test กับกลุ่มตัวอย่างใหญ่ขึ้น</li>
+</ol>
+<hr />
+<h2 id="10">📖 ส่วนที่ 10 — อภิธานศัพท์ (ต้องนิยามได้ถ้าโดนถาม)</h2>
+<table>
+<thead>
+<tr>
+<th>คำ</th>
+<th>นิยามสั้นๆ ที่พูดได้</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Engine-Building</strong></td>
+<td>กลไกเกมที่การลงทุนช่วงต้น (ซื้อการ์ด→ได้โบนัส) ทำให้ช่วงหลังทำแต้มเร็วขึ้นเรื่อยๆ</td>
+</tr>
+<tr>
+<td><strong>Photon Fusion</strong></td>
+<td>SDK เครือข่ายเรียลไทม์สำหรับเกม Unity ทำงานบน UDP</td>
+</tr>
+<tr>
+<td><strong>Shared Mode</strong></td>
+<td>โหมด Fusion ที่ไม่มี server กลางตัวเดียว, authority กระจายตาม object</td>
+</tr>
+<tr>
+<td><strong>Master Client</strong></td>
+<td>ผู้เล่นที่ถูกเลือกให้เป็น "ผู้ตัดสิน" สถานะร่วมในห้อง</td>
+</tr>
+<tr>
+<td><strong>State Synchronization</strong></td>
+<td>การทำให้สถานะเกมบนทุกเครื่องตรงกัน</td>
+</tr>
+<tr>
+<td><strong>Race Condition</strong></td>
+<td>สภาวะที่หลายคำสั่งทำงานพร้อมกันแล้วผลลัพธ์ผิดเพี้ยน</td>
+</tr>
+<tr>
+<td><strong><code>SELECT FOR UPDATE</code></strong></td>
+<td>คำสั่ง SQL ล็อกแถวข้อมูลในธุรกรรม กันแก้พร้อมกัน</td>
+</tr>
+<tr>
+<td><strong>Server-Authoritative</strong></td>
+<td>server เป็นผู้คำนวณ/ตัดสินค่าจริง client ปลอมไม่ได้</td>
+</tr>
+<tr>
+<td><strong>RLS (Row Level Security)</strong></td>
+<td>กฎความปลอดภัยระดับแถวใน PostgreSQL คุมว่าใครอ่าน/เขียนแถวไหนได้</td>
+</tr>
+<tr>
+<td><strong>BaaS</strong></td>
+<td>Backend-as-a-Service — บริการหลังบ้านสำเร็จรูปบนคลาวด์ (เช่น Supabase)</td>
+</tr>
+<tr>
+<td><strong>RPC / Database Function</strong></td>
+<td>ฟังก์ชันที่รันฝั่ง server/ฐานข้อมูล เรียกจาก client ได้</td>
+</tr>
+<tr>
+<td><strong>MMR</strong></td>
+<td>Matchmaking Rating — คะแนนวัดฝีมือใช้จัดอันดับ/จับคู่</td>
+</tr>
+<tr>
+<td><strong>OTP</strong></td>
+<td>One-Time Password — รหัสยืนยันใช้ครั้งเดียว (เราเก็บเป็น hash)</td>
+</tr>
+<tr>
+<td><strong>Heuristic</strong></td>
+<td>เกณฑ์/สูตรประมาณการช่วยตัดสินใจ (ในบอทใช้ให้คะแนนการ์ด)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="_2">✅ เช็กลิสต์ก่อนเข้าห้องสอบ</h3>
+<ul>
+<li>☐ ท่องตัวเลขในส่วนที่ 1 ได้คล่อง (20 แต้ม, 5 ทรัพยากร, 3 tier, 10 เหรียญ, 2–4 คน)</li>
+<li>☐ ซ้อมตอบ Q5–Q13 (คำถามเทคนิค) ให้เป็นธรรมชาติ</li>
+<li>☐ <strong>ตัดสินใจเรื่องส่วนที่ 8</strong> (จะแก้โค้ด แก้เล่ม หรือจำไว้ตอบ) อย่างน้อยข้อ #1</li>
+<li>☐ เตรียมเดโม่/คลิปสำรอง 3 อย่าง (ซื้อการ์ด, ควิซสลับเทิร์น, จับคู่ออนไลน์)</li>
+<li>☐ เปิดสไลด์ข้อจำกัด+อนาคต (ส่วนที่ 9) ไว้ตอบเชิงรุก</li>
+</ul>
+<blockquote>
+<p><strong>ขอให้พรีเซนต์ผ่านฉลุยครับ! 💪</strong> ถ้ามีคำถามเพิ่มหรืออยากให้ซ้อมตอบข้อไหน กลับมาถามได้เลย</p>
+</blockquote>
+</div>
+</body>
+</html>

@@ -483,17 +483,14 @@ public partial class GameController
         }
 
         // เทียบสถานะปัจจุบันกับที่รับมา — ถ้าเหมือนกันแล้วไม่ rebuild (กันการ์ดกระพริบทุกเทิร์น)
-        List<string> incoming = new List<string>();
-        foreach (string id in cardIds)
-        {
-            if (!string.IsNullOrEmpty(id)) incoming.Add(id);
-        }
+        // เก็บ "" (ช่องว่างจากกองหมด) ไว้ด้วย เพื่อรักษา "ตำแหน่งช่อง" ให้ตรงกันทุกเครื่อง (ไม่งั้นการ์ดเลื่อน/desync)
+        List<string> incoming = new List<string>(cardIds);
 
         List<string> current = new List<string>();
         foreach (Transform child in container)
         {
             CardDisplay display = child.GetComponent<CardDisplay>();
-            if (display != null && display.data != null) current.Add(display.data.cardId);
+            current.Add(display != null && display.data != null ? display.data.cardId : string.Empty);
         }
 
         if (incoming.Count == current.Count)
@@ -510,10 +507,18 @@ public partial class GameController
         ClearContainer(container);
         foreach (string id in incoming)
         {
+            // ช่องว่าง (กองหมด) → วาง placeholder รักษาตำแหน่ง ไม่ให้การ์ดที่เหลือเลื่อน
+            if (string.IsNullOrEmpty(id))
+            {
+                SpawnEmptyCardSlot(container);
+                continue;
+            }
+
             CardData data = FindCardDataById(id);
             if (data == null)
             {
                 Debug.LogWarning($"[GameController] ไม่พบ CardData สำหรับ cardId '{id}' ตอน sync กระดาน");
+                SpawnEmptyCardSlot(container); // กันช่องหาย/เลื่อน ถ้าหา data ไม่เจอ
                 continue;
             }
 
