@@ -86,6 +86,14 @@ public class QuizManager : MonoBehaviour
     private int lastSecondTicked = -1;
     private bool _quizStartRequestedBeforeLoad; // มีการสั่งเริ่มควิซตอน DB ยังโหลดไม่เสร็จ
 
+    [Header("---- ตั้งค่าบอท (โหมด offline) ----")]
+    [Tooltip("โอกาสที่บอทแต่ละตัวจะตอบถูก (0-1) เช่น 0.5 = 50%")]
+    [Range(0f, 1f)] public float botCorrectChance = 0.5f;
+    // เวลา (วินาทีนับจากเริ่มคำถาม) ที่บอทแต่ละ seat จะตอบ — สุ่มตอนเริ่มคำถาม ไม่ผูกกับผู้เล่น
+    private float[] botAnswerTimes;
+    private bool[] botHasAnswered;
+    private bool localAnswered; // ผู้เล่นตอบแล้วในรอบนี้ (offline) — กันเสียง tick เด้งหลังตอบ
+
     [Header("---- ข้อความตอบกลับ (Quiz Feedback) ----")]
     public string[] correctFeedbacks = {
         "เพอร์เฟกต์! คำตอบถูกต้อง! รับรางวัลพิเศษไปเลย!",
@@ -350,9 +358,19 @@ public class QuizManager : MonoBehaviour
         if (currentSecond != lastSecondTicked && currentSecond >= 0)
         {
             lastSecondTicked = currentSecond;
-            if (!isWaitingForOnlineResults)
+            if (!isWaitingForOnlineResults && !localAnswered)
             {
                 PlayTimerSound();
+            }
+        }
+
+        // โหมด offline: ให้บอทตอบตามเวลาที่สุ่มไว้ระหว่างนับถอยหลัง (ไม่ขึ้นกับผู้เล่น)
+        if (!IsOnlineQuizMode())
+        {
+            UpdateBotAnswers();
+            if (!isQuizActive)
+            {
+                return; // ทุกคนตอบครบแล้ว → ควิซจบใน UpdateBotAnswers
             }
         }
 
@@ -485,7 +503,14 @@ public class QuizManager : MonoBehaviour
         }
         else
         {
-            ForceEndQuiz();
+            // โหมด offline: ไม่จบควิซทันที — ล็อกปุ่มแล้วปล่อยให้บอทตอบตามเวลาที่สุ่มไว้ / จนหมดเวลา
+            localAnswered = true;
+            StopTimerSound();
+            DisableAnswerButtons();
+            if (HaveAllPlayersAnswered())
+            {
+                ForceEndQuiz();
+            }
         }
     }
 
@@ -526,6 +551,7 @@ public class QuizManager : MonoBehaviour
         ForceEndQuiz();
     }
 
+    // Safety net: เติมคำตอบให้บอทที่ "ยังไม่ได้ตอบ" ตอนควิซจบ (ปกติบอทจะตอบเองแบบ real-time ใน UpdateBotAnswers แล้ว)
     private void SimulateOtherPlayers(int excludeIndex)
     {
         int totalPlayers = GetTotalPlayersForQuiz();
@@ -536,9 +562,63 @@ public class QuizManager : MonoBehaviour
                 continue;
             }
 
-            float botDifficulty = Random.Range(0.4f, 0.8f);
+            // ข้ามบอทที่ตอบไปแล้ว — ไม่งั้นจะทับคำตอบ real-time ของมัน
+            if (currentAnswers.Any(answer => answer.playerIndex == i))
+            {
+                continue;
+            }
+
             float botSpeed = Random.Range(1.0f, timeLimit);
-            UpsertAnswer(i, Random.value < botDifficulty, botSpeed);
+            UpsertAnswer(i, Random.value < botCorrectChance, botSpeed);
+        }
+    }
+
+    // โหมด offline: สุ่ม "เวลาตอบ" ของบอทแต่ละตัวตั้งแต่เริ่มคำถาม (ไม่ขึ้นกับผู้เล่น)
+    private void ScheduleBotAnswers()
+    {
+        int totalPlayers = GetTotalPlayersForQuiz();
+        botAnswerTimes = new float[totalPlayers];
+        botHasAnswered = new bool[totalPlayers];
+
+        int localSeat = gameController != null ? gameController.LocalPlayerSeatIndex : 0;
+        float maxAnswerTime = Mathf.Max(5.5f, timeLimit - 0.5f); // ตอบช้าสุดก่อนหมดเวลา ~0.5 วิ
+        float minAnswerTime = Mathf.Min(5f, maxAnswerTime);      // ตอบเร็วสุด 5 วิ
+
+        for (int i = 0; i < totalPlayers; i++)
+        {
+            if (i == localSeat)
+            {
+                botHasAnswered[i] = true; // ไม่ใช่บอท
+                continue;
+            }
+            botAnswerTimes[i] = Random.Range(minAnswerTime, maxAnswerTime);
+        }
+    }
+
+    // เรียกทุกเฟรมระหว่างควิซ (offline): บอทตัวไหนถึงเวลาตอบแล้วก็บันทึกคำตอบ
+    private void UpdateBotAnswers()
+    {
+        if (botAnswerTimes == null)
+        {
+            return;
+        }
+
+        float elapsed = timeLimit - currentTime;
+        for (int i = 0; i < botAnswerTimes.Length; i++)
+        {
+            if (botHasAnswered[i] || elapsed < botAnswerTimes[i])
+            {
+                continue;
+            }
+
+            botHasAnswered[i] = true;
+            bool isCorrect = Random.value < botCorrectChance;
+            UpsertAnswer(i, isCorrect, botAnswerTimes[i]);
+        }
+
+        if (HaveAllPlayersAnswered())
+        {
+            ForceEndQuiz();
         }
     }
 
@@ -785,6 +865,15 @@ public class QuizManager : MonoBehaviour
         lastSecondTicked = Mathf.CeilToInt(timeLimit);
         isQuizActive = true;
         isWaitingForOnlineResults = false;
+        localAnswered = false;
+        botAnswerTimes = null;
+        botHasAnswered = null;
+
+        // โหมด offline: สุ่มเวลาตอบของบอททุกตัวตั้งแต่ตอนนี้ (ไม่ผูกกับผู้เล่น)
+        if (!IsOnlineQuizMode())
+        {
+            ScheduleBotAnswers();
+        }
 
         if (timeBarFill != null) timeBarFill.fillAmount = 1f;
 
