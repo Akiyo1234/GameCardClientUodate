@@ -40,11 +40,7 @@ public class LobbyUI : MonoBehaviour
         string rName = roomNameInputField.text;
         if (string.IsNullOrEmpty(rName))
         {
-            const string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-            var sb = new System.Text.StringBuilder(8);
-            for (int i = 0; i < 8; i++)
-                sb.Append(chars[Random.Range(0, chars.Length)]);
-            rName = sb.ToString();
+            rName = Random.Range(1000, 9999).ToString();
             roomNameInputField.text = rName;
         }
         
