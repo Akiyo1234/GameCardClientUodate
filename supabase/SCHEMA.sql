@@ -102,11 +102,15 @@ create table if not exists public.shop_items (
 --    RLS: เปิด — ไม่มี policy client => เข้าถึงได้เฉพาะ service_role
 -- ════════════════════════════════════════════════════════════════════════════
 create table if not exists public.daily_quiz_claims (
-    user_id    uuid not null references auth.users(id) on delete cascade,
-    claim_date date not null,
-    created_at timestamptz not null default now(),
+    user_id     uuid not null references auth.users(id) on delete cascade,
+    claim_date  date not null,
+    created_at  timestamptz not null default now(),
+    question_id text,                 -- external_id ของข้อที่ตอบ (ใช้กรองข้อซ้ำใน get_unanswered_daily_questions)
     primary key (user_id, claim_date)
 );
+
+-- RPC ที่เกี่ยวข้อง (has_claimed_daily_quiz_today, get_unanswered_daily_questions)
+-- อยู่ใน migrations/20260613_daily_quiz_rpcs_and_attempt_tracking.sql
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- 6) quiz_patches — metadata ของแต่ละชุด/แพ็กคำถามควิซ

@@ -278,6 +278,15 @@ public static class PlayerDataService
         return true;
     }
 
+    /// <summary>บันทึกว่า "วันนี้ตอบควิซแล้ว" บน server โดยไม่ให้รางวัล — ใช้ตอนตอบผิด/หมดเวลา
+    /// เพื่อให้ลิมิต 1 ครั้ง/วัน นับรวมการตอบผิดด้วย (กันเปิดเข้ามาตอบใหม่จากเครื่องอื่น/หลังล้าง prefs)</summary>
+    public static async Task RecordQuizAttemptAsync()
+    {
+        var (ok, status, body) = await CallAuthedFnAsync("record-quiz-attempt", "{}");
+        if (!ok)
+            Debug.LogWarning($"[PlayerData] quiz attempt not recorded ({status}): {body}");
+    }
+
     /// <summary>ดึงคำถามที่ผู้เล่นยังไม่เคยตอบ (ผ่าน Supabase RPC get_unanswered_daily_questions)</summary>
     public static async Task<string> FetchUnansweredDailyQuestionIdAsync()
     {

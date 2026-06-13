@@ -155,8 +155,7 @@ public partial class GameController : MonoBehaviour
             FusionManager.Instance.EconomyStateReceived += HandleOnlineEconomyStateReceived;
             FusionManager.Instance.BoardStateReceived += HandleOnlineBoardStateReceived;
             FusionManager.Instance.FullStateRequested += HandleFullStateRequested;
-            FusionManager.Instance.PlayerCharacterReceived += ApplyRemoteCharacterPortrait; 
-            FusionManager.Instance.PlayerFrameReceived += ApplyRemoteFrameUI; 
+            FusionManager.Instance.PlayerCharacterReceived += ApplyRemoteCharacterPortrait;
         }
 
         EnsureBotController();
@@ -351,7 +350,6 @@ public partial class GameController : MonoBehaviour
             FusionManager.Instance.BoardStateReceived -= HandleOnlineBoardStateReceived;
             FusionManager.Instance.FullStateRequested -= HandleFullStateRequested;
             FusionManager.Instance.PlayerCharacterReceived -= ApplyRemoteCharacterPortrait;
-            FusionManager.Instance.PlayerFrameReceived -= ApplyRemoteFrameUI;
         }
     }
 

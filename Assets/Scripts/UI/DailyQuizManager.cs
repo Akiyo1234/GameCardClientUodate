@@ -191,6 +191,14 @@ public class DailyQuizManager : MonoBehaviour
 
     private async void CheckDailyStatus()
     {
+        // ด่านกันเล่นซ้ำชั้นแรก (local) — กันกรณีตอบผิด/หมดเวลาแล้วเปิดเข้ามาใหม่
+        // ก่อน server จะ sync ทัน (MarkAsPlayed เขียนค่านี้ทุกครั้งที่ตอบ ทั้งถูก/ผิด/หมดเวลา)
+        if (PlayerPrefs.GetString("LastDailyQuizDate", "") == DateTime.Now.ToString("yyyy-MM-dd"))
+        {
+            ShowAlreadyPlayed();
+            return;
+        }
+
         bool hasClaimed = await PlayerDataService.HasClaimedDailyQuizTodayAsync();
 
         if (hasClaimed)
@@ -472,6 +480,10 @@ public class DailyQuizManager : MonoBehaviour
             resultMessageText.color = new Color(1f, 0.8f, 0.8f); // สีขาวอมแดงจางๆ
             rewardText.text = "สู้ๆ นะ! ไว้ลองใหม่วันพรุ่งนี้";
             // (เสียง wrong เล่นไปแล้วที่ SubmitDailyAnswer — ไม่เล่นซ้ำ)
+
+            // บันทึกการตอบผิด/หมดเวลาลง server (ไม่ให้รางวัล) เพื่อล็อก 1 ครั้ง/วันให้นับรวมการตอบผิดด้วย
+            // กรณีตอบถูกไม่ต้องเรียกที่นี่ — grant-quiz-reward ใส่ claim row ให้แล้ว (กัน insert ชนกันจน reward ไม่เข้า)
+            _ = PlayerDataService.RecordQuizAttemptAsync();
         }
     }
 
