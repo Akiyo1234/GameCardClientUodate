@@ -185,6 +185,9 @@ public partial class GameController
         }
         if (isGameOver) return;
 
+        // [Game.Core] ตรวจคู่ขนานก่อน commit (flag ปิด = ไม่ทำอะไร) — ดู GameController.Authority.cs
+        if (useCoreValidation) ShadowValidateTakeCoins();
+
         if (GetTotalPendingCoins() > 0) {
             for (int i = 0; i < 6; i++) bankCoins[i] -= pendingCoins[i];
             players[playOrder[currentPlayerIndex]].ReceiveCoins(pendingCoins); // เปลี่ยนเป็นแจกให้คนเล่นตามคิว
