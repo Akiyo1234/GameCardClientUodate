@@ -18,6 +18,9 @@ public partial class GameController
     [Tooltip("เปิดเพื่อให้ Game.Core ตรวจคู่ขนานกับ logic เดิม (log parity) — ยังไม่ขับเกมจริง")]
     [SerializeField] private bool useCoreValidation = false;
 
+    [Tooltip("เปิดเพื่อให้ Game.Core เป็นคนคำนวณผล TakeCoins จริง (เขียนผลกลับ) — turn/noble/online ยังเป็น legacy")]
+    [SerializeField] private bool useCoreDrive = false;
+
     // สร้าง GameState (pure) จากสภาพเกมปัจจุบัน — อ่าน field ของ GameController/PlayerUI/board ตรงๆ
     private GameState BuildCoreGameState()
     {
@@ -125,5 +128,32 @@ public partial class GameController
         GameLog.Log(ok
             ? "[CoreParity][TakeCoins] PASS — core ตรงกับ legacy"
             : $"[CoreParity][TakeCoins] MISMATCH:{sb}");
+    }
+
+    // ให้ core เป็นคนคำนวณผล TakeCoins แล้วเขียนผลกลับ (bank + เหรียญผู้เล่นปัจจุบัน)
+    //   turn advance / noble / online publish ยังปล่อยให้ legacy EndTurn ทำต่อ
+    //   คืน true = core จัดการแล้ว, false = core ปฏิเสธ → ให้ legacy commit แทน
+    private bool DriveTakeCoinsViaCore()
+    {
+        GameState state = BuildCoreGameState();
+        int seat = playOrder[currentPlayerIndex];
+        var action = new TakeCoinsAction { seat = seat, coins = (int[])pendingCoins.Clone() };
+        ActionResult result = GameRules.ApplyAction(state, action);
+
+        if (!result.ok)
+        {
+            GameLog.Log($"[CoreDrive][TakeCoins] core ปฏิเสธ → fallback legacy. err={result.error}");
+            return false;
+        }
+
+        for (int i = 0; i < 6; i++)
+        {
+            bankCoins[i] = result.next.bankCoins[i];
+            players[seat].coins[i] = result.next.players[seat].coins[i];
+        }
+        players[seat].UpdateUI();
+        ClearPendingCoins();
+        GameLog.Log("[CoreDrive][TakeCoins] applied by core");
+        return true;
     }
 }

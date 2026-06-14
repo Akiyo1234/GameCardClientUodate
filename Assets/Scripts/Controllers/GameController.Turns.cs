@@ -185,13 +185,17 @@ public partial class GameController
         }
         if (isGameOver) return;
 
-        // [Game.Core] ตรวจคู่ขนานก่อน commit (flag ปิด = ไม่ทำอะไร) — ดู GameController.Authority.cs
-        if (useCoreValidation) ShadowValidateTakeCoins();
-
         if (GetTotalPendingCoins() > 0) {
-            for (int i = 0; i < 6; i++) bankCoins[i] -= pendingCoins[i];
-            players[playOrder[currentPlayerIndex]].ReceiveCoins(pendingCoins); // เปลี่ยนเป็นแจกให้คนเล่นตามคิว
-            ClearPendingCoins();
+            // [Game.Core] ตรวจคู่ขนาน (shadow) — flag ปิด = ไม่ทำอะไร, ดู GameController.Authority.cs
+            if (useCoreValidation) ShadowValidateTakeCoins();
+
+            // [Game.Core] ถ้าเปิด drive ให้ core คำนวณ+เขียนผล; ถ้า core ปฏิเสธ → fallback legacy
+            bool driven = useCoreDrive && DriveTakeCoinsViaCore();
+            if (!driven) {
+                for (int i = 0; i < 6; i++) bankCoins[i] -= pendingCoins[i];
+                players[playOrder[currentPlayerIndex]].ReceiveCoins(pendingCoins); // เปลี่ยนเป็นแจกให้คนเล่นตามคิว
+                ClearPendingCoins();
+            }
         }
 
         UpdateBankUI();
