@@ -73,17 +73,44 @@ click → build GameAction → (ส่งไป host) → host: ApplyAction(stat
 ## Roadmap
 
 1. ✅ **แยก Game Core เป็น C# ล้วน** — state + action + rules (Assets/Scripts/Game/Core)
-2. ✅ **กฎทุก action (pure + เทสต์ผ่าน 68 เคส ผ่าน dotnet):**
-   - `TakeCoins` (18), `BuyCard` board/reserve + `ReserveCard` (30), Noble + Quiz (20)
-   - เงื่อนไขชนะ (รวมแต้มขุนนาง), จั่ว deterministic, immutability
-   - ควิซแยกเป็น `QuizRules` (round resolution: ผู้ชนะ = ถูก+เร็วสุด)
-3. ⏳ **[ถัดไป] สร้าง adapter ฝั่ง Unity** — `ICardDatabase`/`IQuizDatabase` ครอบ `CardDatabaseLoader`/quiz DB
-4. ⏳ **Wire เข้าเกมจริง** — UI สร้าง Action → host เรียก `ApplyAction`/`QuizRules` → render จาก state
-5. ⏳ Reconnect/resume ตามมาเอง (state รวมศูนย์)
-6. ⏳ (ถ้ามีเวลา) host เป็น headless dedicated server จริง
+2. ✅ **กฎทุก action** — TakeCoins, BuyCard(board/reserve), ReserveCard, Noble, Quiz(QuizRules)
+3. ✅ **เครื่องมือ authority ครบ (pure, ~142 assertions ผ่าน dotnet / 70+ tests ใน Unity):**
+   - `GameStateValidator` — ตรวจสถานะเป็นไปไม่ได้ (กันโกง/desync)
+   - `GameStateDiff` — เทียบ state (parity/desync) มี ignore options
+   - `GameStateCodec` / `GameActionCodec` — state/action ↔ byte[] (binary, สำหรับ online/DB)
+   - `GameStateFactory.NewGame` — สร้าง state เริ่มต้น deterministic
+4. ✅ **adapter ฝั่ง Unity** — `CardDatabaseAdapter`, `QuizDatabaseAdapter`
+5. ✅ **wire บางส่วน (หลัง flag, ยืนยันในเกมแล้ว):**
+   - shadow parity ทุก action (useCoreValidation) — PASS ในเกมจริง
+   - DRIVE `TakeCoins` (useCoreDrive) — core คำนวณเหรียญจริง
+   - render-from-state helpers (bank/players/board/reserved/turn)
+6. ⏳ **[ถัดไป — Unity-in-the-loop] DRIVE ซื้อ/จอง** — ต้องแยก `EndTurn` เป็น
+   "resolve (noble/win/advance)" กับ "side-effects (publish/quiz/bot)" ก่อน
+   ไม่งั้น noble/win นับซ้ำ (core ทำในตัวแล้ว). ดู "Online integration plan" ด้านล่าง
+7. ⏳ **Online host-authority** — host เป็นเจ้าของ GameState จริง
+8. ⏳ Reconnect/resume (state รวมศูนย์ + codec persist), headless server
+
+---
+
+## Online integration plan (ก้าวถัดไป — เครื่องมือ pure พร้อมหมดแล้ว)
+
+```
+[client]  คลิก → สร้าง GameAction → GameActionCodec.Serialize → ส่ง RPC ไป host
+[host]    รับ bytes → GameActionCodec.Deserialize → GameRules.ApplyAction(state, action, cardDb)
+          → (option) GameStateValidator.Validate กันโกง → GameStateCodec.Serialize(next)
+          → broadcast bytes ให้ทุก client
+[ทุกเครื่อง] รับ → GameStateCodec.Deserialize → RenderFromState(next)  (จอแสดงผลตาม state)
+```
+
+- host สร้าง state เริ่มต้นด้วย `GameStateFactory.NewGame(...)` ตอนเกมเริ่ม
+- ส่วนที่ต้องเขียนใหม่ฝั่ง Unity: RPC transport (Fusion `byte[]`) + ตัวเลือก host
+  (player authority = PlayerId ต่ำสุด หรือ headless server) + จุดเรียก RenderFromState
+- ของพร้อมแล้ว: ApplyAction, codec, factory, validator, RenderFromState (bank/players/board/reserved/turn)
+- ค้าง: noble display update ใน render (score ถูกแล้ว แค่ต้องซ่อนใบที่ claimed),
+  buy/reserve drive (ต้อง refactor EndTurn ตามข้อ 6)
 
 หมายเหตุ: เทสต์อยู่ใน Assets/Scripts/Game/Tests (NUnit, EditMode) — รันใน Unity Test Runner ได้
-ตรวจกฎด้วย dotnet (นอก Unity) ทุกครั้งที่แก้ core ก็ได้เช่นกัน
+ตรวจกฎด้วย dotnet ก็ได้ (csproj ชั่วคราว `<Compile Include=".../Game/Core/*.cs"/>` แล้ว `dotnet run`)
 
 ---
 
