@@ -271,7 +271,8 @@ namespace Game.Core
         // จั่วการ์ดแทนช่องที่ว่าง — deterministic (server-authoritative)
         //   เลือกจากกองของ tier นั้น ลบใบที่ใช้ไปแล้ว; ถ้าหมด → คืน null (ช่องว่าง)
         //   [หมายเหตุ] ใช้ seed = boardSeed + drawCounter (deterministic ใหม่ ชัดเจนกว่า formula เดิม)
-        private static string DrawCard(GameState s, ICardDatabase db, int tier)
+        //   internal เพื่อให้ GameStateFactory ใช้ร่วม (กันเขียน logic จั่วซ้ำ)
+        internal static string DrawCard(GameState s, ICardDatabase db, int tier)
         {
             var deck = db.GetTierCardIds(tier);
             if (deck == null) return null;
