@@ -146,14 +146,133 @@ public partial class GameController
             return false;
         }
 
-        for (int i = 0; i < 6; i++)
-        {
-            bankCoins[i] = result.next.bankCoins[i];
-            players[seat].coins[i] = result.next.players[seat].coins[i];
-        }
-        players[seat].UpdateUI();
+        RenderBankFromState(result.next);
+        RenderPlayerCoinsFromState(seat, result.next.players[seat]);
         ClearPendingCoins();
-        GameLog.Log("[CoreDrive][TakeCoins] applied by core");
+        GameLog.Log("[CoreDrive][TakeCoins] applied by core (render-from-state)");
         return true;
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // render-from-state — เขียน GameState กลับเข้า UI/scene
+    //   ใช้ตอน core ขับเกม (drive) และ online sync (host broadcast → client render) ภายหลัง
+    //   ก้อน R1: bank + เหรียญ/โบนัส/คะแนนผู้เล่น + turn  (กระดาน/การ์ดจอง/ขุนนาง ทำก้อนถัดไป)
+    // ════════════════════════════════════════════════════════════════════
+
+    private void RenderBankFromState(GameState s)
+    {
+        if (s?.bankCoins == null || bankCoins == null) return;
+        for (int i = 0; i < bankCoins.Length && i < s.bankCoins.Length; i++)
+            bankCoins[i] = s.bankCoins[i];
+        UpdateBankUI();
+    }
+
+    // เหรียญ/โบนัส/คะแนนของผู้เล่น 1 คน (ยังไม่รวมการ์ดที่จอง — ทำก้อนถัดไป)
+    private void RenderPlayerCoinsFromState(int seat, PlayerState ps)
+    {
+        if (ps == null || players == null || seat < 0 || seat >= players.Length) return;
+        PlayerUI pu = players[seat];
+        if (pu == null) return;
+
+        if (pu.coins != null && ps.coins != null)
+            for (int i = 0; i < pu.coins.Length && i < ps.coins.Length; i++) pu.coins[i] = ps.coins[i];
+        pu.quizBlackCoins = ps.quizBlackCoins;
+        if (pu.bonuses != null && ps.bonuses != null)
+            for (int b = 0; b < pu.bonuses.Length && b < ps.bonuses.Length; b++) pu.bonuses[b] = ps.bonuses[b];
+        pu.currentScore = ps.score;
+        if (pu.scoreText != null) pu.scoreText.text = ps.score.ToString();
+        pu.UpdateUI();
+    }
+
+    // เทิร์น (index/round + visuals) — ใช้ตอน render full state; TakeCoins drive ยังให้ legacy คุม turn เอง
+    private void RenderTurnFromState(GameState s)
+    {
+        if (s == null) return;
+        currentPlayerIndex = s.currentPlayerIndex;
+        currentRound = s.currentRound;
+        totalTurnCount = s.totalTurnCount;
+        UpdateTurnVisuals();
+        UpdateTurnCountUI();
+    }
+
+    // ── R2: กระดาน + การ์ดที่จอง ──
+
+    // วาดกระดานจาก BoardSlot[] — reuse RebuildTierIfChanged (มี anti-flicker + ช่องว่าง) จาก Network.cs
+    private void RenderBoardFromState(GameState s)
+    {
+        if (s == null) return;
+
+        // sync usedCardIds (กันจั่วซ้ำ)
+        if (s.usedCardIds != null)
+        {
+            usedCardIds.Clear();
+            foreach (var id in s.usedCardIds)
+                if (!string.IsNullOrEmpty(id)) usedCardIds.Add(id);
+        }
+
+        var t1 = new List<string>();
+        var t2 = new List<string>();
+        var t3 = new List<string>();
+        if (s.board != null)
+            foreach (var slot in s.board)
+            {
+                string id = slot.cardId ?? string.Empty; // "" = ช่องว่าง (RebuildTierIfChanged เข้าใจ)
+                if (slot.tier == 1) t1.Add(id);
+                else if (slot.tier == 2) t2.Add(id);
+                else if (slot.tier == 3) t3.Add(id);
+            }
+
+        RebuildTierIfChanged(tier3Container, t3.ToArray());
+        RebuildTierIfChanged(tier2Container, t2.ToArray());
+        RebuildTierIfChanged(tier1Container, t1.ToArray());
+    }
+
+    // วาดการ์ดที่จองของผู้เล่น 1 คน (clear + respawn) — mirror การ spawn ใน ExecuteReserve
+    private void RenderPlayerReservedFromState(int seat, PlayerState ps)
+    {
+        if (ps == null || players == null || seat < 0 || seat >= players.Length) return;
+        PlayerUI pu = players[seat];
+        if (pu == null || pu.reservedAreaTransform == null) return;
+
+        foreach (Transform child in pu.reservedAreaTransform) Destroy(child.gameObject);
+        pu.reservedCards.Clear();
+
+        if (ps.reservedCardIds == null) return;
+        foreach (var id in ps.reservedCardIds)
+        {
+            CardData data = FindCardDataById(id);
+            if (data == null) continue;
+
+            pu.reservedCards.Add(data);
+            GameObject resCard = Instantiate(cardPrefab, pu.reservedAreaTransform);
+            resCard.transform.localScale = new Vector3(0.6f, 0.6f, 1f);
+            CardDisplay rd = resCard.GetComponent<CardDisplay>();
+            if (rd != null)
+            {
+                rd.LoadCardData(data);
+                rd.isReserved = true;
+                rd.ownerUI = pu;
+            }
+        }
+    }
+
+    // [TODO R3] อัปเดต display ขุนนางที่ถูก claim (score ของผู้เล่นถูก render ถูกต้องแล้วผ่าน coins/score
+    //           — เหลือแค่ซ่อน NobleDisplay ที่ claimed; ต้องเพิ่ม API ให้ NobleManager claim-by-id)
+    private void RenderNoblesFromState(GameState s) { /* deferred */ }
+
+    // composer: วาด state ทั้งหมด (ใช้ตอน drive ซื้อ/จอง และ online sync)
+    private void RenderFromState(GameState s)
+    {
+        if (s == null) return;
+        RenderBankFromState(s);
+        if (players != null && s.players != null)
+            for (int seat = 0; seat < players.Length && seat < s.players.Length; seat++)
+            {
+                RenderPlayerCoinsFromState(seat, s.players[seat]);
+                RenderPlayerReservedFromState(seat, s.players[seat]);
+            }
+        RenderBoardFromState(s);
+        RenderNoblesFromState(s);
+        RenderTurnFromState(s);
     }
 }
