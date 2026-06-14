@@ -48,6 +48,7 @@ public partial class GameController
         bool canAfford = (missingCoins <= p.coins[5]);
 
         if (canAfford) {
+            if (useCoreValidation) ShadowPredict(new Game.Core.BuyCardAction { seat = playOrder[currentPlayerIndex], cardId = card.data.cardId, fromReserve = false }, "Buy");
             for (int i = 0; i < 5; i++) {
                 int actualCost = Mathf.Max(0, card.data.costs[i] - p.bonuses[i]);
                 if (p.coins[i] < actualCost) {
@@ -78,6 +79,7 @@ public partial class GameController
             ClearWarning();
             UpdateBankUI();
             EndTurn();
+            if (useCoreValidation) ShadowCompareAfterAction();
         } else {
             ShowWarning("ซื้อการ์ดไม่ได้! เหรียญของคุณไม่พอ (รวมส่วนลดและทองแล้ว)");
         }
@@ -153,6 +155,7 @@ public partial class GameController
     private void ExecuteReserve(CardDisplay card)
     {
         PlayerUI p = players[playOrder[currentPlayerIndex]]; // เปลี่ยนเป็นเช็คคนเล่นตามคิว
+        if (useCoreValidation) ShadowPredict(new Game.Core.ReserveCardAction { seat = playOrder[currentPlayerIndex], cardId = card.data.cardId }, "Reserve");
         p.reservedCards.Add(card.data);
 
         int goldIndex = 5;
@@ -186,6 +189,7 @@ public partial class GameController
         ClearWarning();
         UpdateBankUI();
         EndTurn();
+        if (useCoreValidation) ShadowCompareAfterAction();
     }
 
     // แตะการ์ดที่จองไว้ → เปิด popup ดูแบบใหญ่ (ซื้อจากในปุ่มของ popup)
@@ -239,6 +243,7 @@ public partial class GameController
         bool canAfford = (missingCoins <= p.coins[5]);
 
         if (canAfford) {
+            if (useCoreValidation) ShadowPredict(new Game.Core.BuyCardAction { seat = playOrder[currentPlayerIndex], cardId = card.data.cardId, fromReserve = true }, "BuyReserved");
             for (int i = 0; i < 5; i++) {
                 int actualCost = Mathf.Max(0, card.data.costs[i] - p.bonuses[i]);
                 if (p.coins[i] < actualCost) {
@@ -261,6 +266,7 @@ public partial class GameController
             ClearWarning();
             UpdateBankUI();
             EndTurn();
+            if (useCoreValidation) ShadowCompareAfterAction();
         } else {
             ShowWarning("การ์ดที่คุณจองไว้ยังไม่สามารถซื้อได้ เพราะเหรียญไม่พอ!");
         }

@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Text;
 using UnityEngine;
 using Game.Core;
+using Game.Adapters;
 
 // ============================================================
 // GameController — ส่วนเชื่อม Game.Core (authoritative rules)
@@ -20,6 +21,43 @@ public partial class GameController
 
     [Tooltip("เปิดเพื่อให้ Game.Core เป็นคนคำนวณผล TakeCoins จริง (เขียนผลกลับ) — turn/noble/online ยังเป็น legacy")]
     [SerializeField] private bool useCoreDrive = false;
+
+    private ICardDatabase _coreCardDb;
+    private ICardDatabase CoreCardDb => _coreCardDb ??= new CardDatabaseAdapter();
+
+    // ── shadow parity สำหรับ action ที่มี side-effect เยอะ (ซื้อ/จอง) ──
+    //   เก็บ "ผลทำนายของ core" ตอนเริ่ม action แล้วเทียบกับ "ผลจริงของ legacy" หลังจบ
+    //   เทียบเฉพาะ bank/coins/score/bonus/reserved (ข้าม board เพราะ draw RNG ต่าง, ข้าม turn/noble เพราะจังหวะต่าง)
+    private GameState _shadowPrediction;
+    private string _shadowLabel;
+
+    // เรียกตอน "ก่อน" legacy เริ่มแก้สถานะ (มี state เดิมอยู่)
+    private void ShadowPredict(GameAction action, string label)
+    {
+        _shadowPrediction = null;
+        _shadowLabel = label;
+        GameState pre = BuildCoreGameState();
+        ActionResult result = GameRules.ApplyAction(pre, action, CoreCardDb);
+        if (!result.ok)
+        {
+            GameLog.Log($"[CoreParity][{label}] core ปฏิเสธตอนทำนาย: {result.error}");
+            return;
+        }
+        _shadowPrediction = result.next;
+    }
+
+    // เรียกตอน "หลัง" legacy ทำ action เสร็จ (รวม EndTurn) — เทียบผล
+    private void ShadowCompareAfterAction()
+    {
+        if (_shadowPrediction == null) return;
+        GameState legacyNext = BuildCoreGameState();
+        var opts = new DiffOptions { ignoreBoardCards = true, ignoreTurn = true, ignoreNobles = true };
+        List<string> diffs = GameStateDiff.Diff(_shadowPrediction, legacyNext, opts);
+        GameLog.Log(diffs.Count == 0
+            ? $"[CoreParity][{_shadowLabel}] PASS — core ตรงกับ legacy (bank/coins/score/reserved)"
+            : $"[CoreParity][{_shadowLabel}] MISMATCH: {string.Join(" | ", diffs)}");
+        _shadowPrediction = null;
+    }
 
     // สร้าง GameState (pure) จากสภาพเกมปัจจุบัน — อ่าน field ของ GameController/PlayerUI/board ตรงๆ
     private GameState BuildCoreGameState()
