@@ -50,7 +50,14 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     // late-joiner ขอ full state จาก host — ส่ง playerId ของคนที่ขอ เพื่อให้ host ตอบกลับเฉพาะคนนั้น
     public event Action<int> FullStateRequested;
     public event Action<int, int> PlayerCharacterReceived;
-    public event Action<int, string> PlayerFrameReceived; 
+    public event Action<int, string> PlayerFrameReceived;
+
+    // ── [Server-Authoritative transport] ── (ดู Game.Core / Docs/server-authoritative-design.md)
+    //   GameActionReceived: authority รับ "action ที่ client เข้ารหัส" (GameActionCodec) → ApplyAction
+    //   GameStateReceived:  client รับ "state เต็มที่ authority broadcast" (GameStateCodec) → RenderFromState
+    //   ยังไม่มีใคร subscribe จนกว่าจะเปิด useOnlineAuthority — primitives นี้ inert โดยตัวมันเอง
+    public event Action<int, byte[]> GameActionReceived;  // (senderPlayerId, actionBytes) — authority เท่านั้น
+    public event Action<byte[]> GameStateReceived;        // (stateBytes) — client เท่านั้น
 
     private const char PlayerNameSeparator = '|';
     private const string PlayerNameMessageType = "NAME";
@@ -62,8 +69,10 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     private const string BoardStateMessageType = "BOARD";
     private const string QuizRequestMessageType = "QUIZREQ";
     private const string StateRequestMessageType = "STATEREQ";
-    private const string CharacterMessageType = "CHAR"; 
-    private const string FrameMessageType = "FRAME"; 
+    private const string CharacterMessageType = "CHAR";
+    private const string FrameMessageType = "FRAME";
+    private const string GameActionMessageType = "GACT";    // client → authority: 1 GameAction (base64 ของ GameActionCodec)
+    private const string GameStateMessageType = "GSTATE";   // authority → clients: GameState เต็ม (base64 ของ GameStateCodec)
 
     private NetworkRunner _runner;
     private NetworkSceneManagerDefault _sceneManager;
@@ -211,6 +220,31 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         }
 
         _runner.SendReliableDataToPlayer(authority, default, payload);
+    }
+
+    // ── [Server-Authoritative transport] ──
+    // client ส่ง 1 GameAction (เข้ารหัสด้วย GameActionCodec แล้ว) ไปให้ authority
+    //   base64 ห่อใน payload ข้อความ (channel เป็น UTF8 + ตัวคั่น '|'; base64 ไม่มี '|') → ปลอดภัย
+    //   ถ้า local เป็น authority อยู่แล้ว caller ควร ApplyAction เองตรงๆ (SendToAuthority จะ no-op)
+    public void SendGameAction(byte[] actionBytes)
+    {
+        if (_runner == null || actionBytes == null) return;
+        string b64 = Convert.ToBase64String(actionBytes);
+        byte[] payload = Encoding.UTF8.GetBytes($"{GameActionMessageType}{PlayerNameSeparator}{b64}");
+        SendToAuthority(payload);
+    }
+
+    // authority broadcast GameState เต็ม (เข้ารหัสด้วย GameStateCodec) ให้ทุก client
+    public void BroadcastGameState(byte[] stateBytes)
+    {
+        if (_runner == null || stateBytes == null || !IsLocalAuthority(_runner)) return;
+        string b64 = Convert.ToBase64String(stateBytes);
+        byte[] payload = Encoding.UTF8.GetBytes($"{GameStateMessageType}{PlayerNameSeparator}{b64}");
+        foreach (var activePlayer in _runner.ActivePlayers)
+        {
+            if (activePlayer == _runner.LocalPlayer) continue;
+            _runner.SendReliableDataToPlayer(activePlayer, default, payload);
+        }
     }
 
     // =============================================================================
@@ -724,6 +758,30 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
                 }
             }
 
+            return;
+        }
+
+        // ── [Server-Authoritative] client → authority: 1 GameAction ──
+        if (string.Equals(parts[0], GameActionMessageType, StringComparison.Ordinal))
+        {
+            // ประมวลผลเฉพาะฝั่ง authority (client อื่นที่หลงรับมาให้ทิ้ง)
+            if (!IsLocalAuthority(runner) || parts.Length < 2) return;
+            byte[] actionBytes;
+            try { actionBytes = Convert.FromBase64String(parts[1]); }
+            catch { return; }
+            GameActionReceived?.Invoke(player.PlayerId, actionBytes);
+            return;
+        }
+
+        // ── [Server-Authoritative] authority → clients: GameState เต็ม ──
+        if (string.Equals(parts[0], GameStateMessageType, StringComparison.Ordinal))
+        {
+            // client เท่านั้น render (authority เป็นเจ้าของ state อยู่แล้ว)
+            if (IsLocalAuthority(runner) || parts.Length < 2) return;
+            byte[] stateBytes;
+            try { stateBytes = Convert.FromBase64String(parts[1]); }
+            catch { return; }
+            GameStateReceived?.Invoke(stateBytes);
             return;
         }
 

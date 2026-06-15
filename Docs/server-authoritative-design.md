@@ -113,9 +113,16 @@ click → build GameAction → (ส่งไป host) → host: ApplyAction(stat
   **RenderFromState ครบ** (bank/players/board/reserved/turn/**nobles**), DRIVE take/buy/reserve
   - noble render = `NobleManager.ClaimByName` ซ่อน visual ใบ claimed โดยไม่บวกคะแนนซ้ำ
     (คะแนนมาจาก PlayerState.score), idempotent เรียกซ้ำได้
-- ค้าง: online host-authority drive แบบเต็ม (board replacement ต้อง deterministic ผ่าน core
-  ไม่ใช่ legacy RNG → ตอนนี้ offline drive ใช้ legacy draw อยู่ ปลอดภัยเพราะกระดาน offline สุ่มอยู่แล้ว)
-  + RPC transport (Fusion byte[]) ตาม flow ด้านบน
+  - **RPC transport พร้อมแล้ว (inert)** ใน FusionManager:
+    - `SendGameAction(byte[])` client→authority (base64 ของ GameActionCodec ห่อใน payload `GACT|…`)
+    - `BroadcastGameState(byte[])` authority→clients (`GSTATE|…`)
+    - events `GameActionReceived(senderId, bytes)` / `GameStateReceived(bytes)` — ยังไม่มีใคร subscribe
+- ค้าง (ต้องเทสต์ 2 เครื่องจริง): wire GameController เข้า transport หลัง flag `useOnlineAuthority`:
+  - client (ไม่ใช่ authority): intercept action → `GameActionCodec.Serialize` → `SendGameAction`
+  - authority: subscribe `GameActionReceived` → `BuildCoreGameState` → `ApplyAction` (resolveTurn:true)
+    → `RenderFromState` (ของตัวเอง) + `GameStateCodec.Serialize` → `BroadcastGameState`
+  - client: subscribe `GameStateReceived` → `GameStateCodec.Deserialize` → `RenderFromState`
+  - board replacement ออนไลน์ต้อง deterministic ผ่าน core (เลิกใช้ legacy RNG path)
 
 หมายเหตุ: เทสต์อยู่ใน Assets/Scripts/Game/Tests (NUnit, EditMode) — รันใน Unity Test Runner ได้
 ตรวจกฎด้วย dotnet ก็ได้ (csproj ชั่วคราว `<Compile Include=".../Game/Core/*.cs"/>` แล้ว `dotnet run`)
