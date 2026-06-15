@@ -278,6 +278,55 @@ public static class PlayerDataService
         return true;
     }
 
+    [System.Serializable]
+    public class SubmitQuizResponseRow {
+        public bool success;
+        public string message;
+        public int reward_gems;
+    }
+    [System.Serializable] private class SubmitQuizWrapper { public SubmitQuizResponseRow[] rows; }
+
+    /// <summary>บันทึกคำตอบลงฐานข้อมูล (ทำทั้งตอบถูกและผิด เพื่อป้องกันการปั๊มตอบซ้ำ)</summary>
+    public static async Task<(bool success, string message, int gems)> SubmitDailyQuizAnswerAsync(bool isCorrect, int rewardGems)
+    {
+        var sb = SupabaseManager.Instance?.Client;
+        if (sb?.Auth?.CurrentUser == null) return (false, "Not logged in", 0);
+
+        try
+        {
+            string userId = sb.Auth.CurrentUser.Id;
+            string url = $"{SupabaseConfig.Url}/rest/v1/rpc/submit_daily_quiz_answer";
+            using var req = new HttpRequestMessage(HttpMethod.Post, url);
+            req.Headers.TryAddWithoutValidation("apikey", SupabaseConfig.AnonKey);
+            req.Headers.TryAddWithoutValidation("Authorization", $"Bearer {sb.Auth.CurrentSession.AccessToken}");
+            
+            string payload = $"{{\"p_user_id\":\"{userId}\", \"p_is_correct\":{isCorrect.ToString().ToLower()}, \"p_reward_gems\":{rewardGems}}}";
+            req.Content = new StringContent(payload, Encoding.UTF8, "application/json");
+
+            var resp = await _http.SendAsync(req);
+            string body = await resp.Content.ReadAsStringAsync();
+            if (!resp.IsSuccessStatusCode)
+            {
+                Debug.LogWarning($"[PlayerData] submit_daily_quiz_answer failed: {body}");
+                return (false, body, 0);
+            }
+
+            string wrapped = $"{{\"rows\":{body}}}";
+            var data = JsonUtility.FromJson<SubmitQuizWrapper>(wrapped);
+            if (data != null && data.rows != null && data.rows.Length > 0)
+            {
+                var row = data.rows[0];
+                return (row.success, row.message, row.reward_gems);
+            }
+            return (false, "Invalid format", 0);
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning($"[PlayerData] SubmitDailyQuizAnswer error: {e.Message}");
+            return (false, e.Message, 0);
+        }
+    }
+
     /// <summary>ดึงคำถามที่ผู้เล่นยังไม่เคยตอบ (ผ่าน Supabase RPC get_unanswered_daily_questions)</summary>
     public static async Task<string> FetchUnansweredDailyQuestionIdAsync()
     {
@@ -319,7 +368,15 @@ public static class PlayerDataService
     [System.Serializable] private class UnansweredRow { public string external_id; }
     [System.Serializable] private class UnansweredWrapper { public UnansweredRow[] rows; }
 
-    /// <summary>ตรวจสอบผ่าน Supabase RPC ว่าวันนี้เคยรับรางวัลไปแล้วหรือยัง</summary>
+    [System.Serializable]
+    public class DailyQuizStatusRow {
+        public bool has_claimed;
+        public bool already_answered;
+        public int reward_gems;
+    }
+    [System.Serializable] private class DailyQuizStatusWrapper { public DailyQuizStatusRow[] rows; }
+
+    /// <summary>ตรวจสอบผ่าน Supabase RPC ว่าวันนี้เคยตอบและรับรางวัลไปแล้วหรือยัง</summary>
     public static async Task<bool> HasClaimedDailyQuizTodayAsync()
     {
         var sb = SupabaseManager.Instance?.Client;
@@ -341,8 +398,13 @@ public static class PlayerDataService
                 Debug.LogWarning($"[PlayerData] has_claimed_daily_quiz_today failed: {body}");
                 return false;
             }
-
-            return body.Trim().ToLower() == "true";
+            string wrapped = $"{{\"rows\":{body}}}";
+            var data = JsonUtility.FromJson<DailyQuizStatusWrapper>(wrapped);
+            if (data != null && data.rows != null && data.rows.Length > 0)
+            {
+                return data.rows[0].already_answered;
+            }
+            return false;
         }
         catch (System.Exception e)
         {

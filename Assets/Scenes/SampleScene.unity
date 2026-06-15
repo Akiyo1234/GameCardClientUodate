@@ -3917,6 +3917,7 @@ MonoBehaviour:
   rewardText: {fileID: 708983426}
   resultScreen: {fileID: 2030550574}
   timeLimit: 10
+  botCorrectChance: 0.5
   correctFeedbacks:
   - "\u0E40\u0E1E\u0E2D\u0E23\u0E4C\u0E40\u0E1F\u0E01\u0E15\u0E4C! \u0E04\u0E33\u0E15\u0E2D\u0E1A\u0E16\u0E39\u0E01\u0E15\u0E49\u0E2D\u0E07!
     \u0E23\u0E31\u0E1A\u0E23\u0E32\u0E07\u0E27\u0E31\u0E25\u0E1E\u0E34\u0E40\u0E28\u0E29\u0E44\u0E1B\u0E40\u0E25\u0E22!"

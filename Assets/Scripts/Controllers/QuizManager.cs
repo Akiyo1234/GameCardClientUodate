@@ -5,6 +5,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine.Networking;
+using System.Threading.Tasks;
 
 public class QuizManager : MonoBehaviour
 {
@@ -131,7 +132,7 @@ public class QuizManager : MonoBehaviour
         if (quizPanel != null) quizPanel.SetActive(false);
 
         // โหลดคำถาม: ลอง Supabase ก่อน → fallback → local JSON
-        StartCoroutine(LoadQuizDatabaseHybrid());
+        _ = LoadQuizDatabaseHybridAsync();
     }
 
     // ─── JSON Classes สำหรับ Supabase RPC response ──────────────────────
@@ -153,11 +154,10 @@ public class QuizManager : MonoBehaviour
     private class SupabaseQuestionArray { public SupabaseQuestion[] questions; }
 
     // ─── Hybrid Loader ───────────────────────────────────────────────────
-    private IEnumerator LoadQuizDatabaseHybrid()
+    private async Task LoadQuizDatabaseHybridAsync()
     {
         // ขั้น 1: ลองโหลดจาก Supabase ถ้ามีเน็ต
-        bool supabaseOk = false;
-        yield return StartCoroutine(FetchFromSupabase(result => supabaseOk = result));
+        bool supabaseOk = await FetchFromSupabaseAsync();
 
         if (!supabaseOk)
         {
@@ -186,34 +186,31 @@ public class QuizManager : MonoBehaviour
     }
 
     // ─── Fetch จาก Supabase ─────────────────────────────────────────────
-    private IEnumerator FetchFromSupabase(System.Action<bool> onDone)
+    private async Task<bool> FetchFromSupabaseAsync()
     {
-        string url = SUPABASE_URL + "/rest/v1/rpc/get_active_questions";
-        using (UnityWebRequest req = new UnityWebRequest(url, "POST"))
+        try
         {
-            byte[] bodyRaw = System.Text.Encoding.UTF8.GetBytes("{}");
-            req.uploadHandler   = new UploadHandlerRaw(bodyRaw);
-            req.downloadHandler = new DownloadHandlerBuffer();
-            req.SetRequestHeader("Content-Type",  "application/json");
-            req.SetRequestHeader("apikey",         SUPABASE_ANON);
-            req.SetRequestHeader("Authorization",  "Bearer " + SUPABASE_ANON);
-
-            yield return req.SendWebRequest();
-
-            if (req.result != UnityWebRequest.Result.Success)
+            if (SupabaseManager.Instance == null)
             {
-                Debug.LogWarning($"[Quiz] Supabase fetch failed: {req.error}");
-                onDone(false);
-                yield break;
+                Debug.LogWarning("[Quiz] SupabaseManager not found.");
+                return false;
             }
 
-            string json = req.downloadHandler.text;
-            if (string.IsNullOrEmpty(json) || json == "[]" || json == "null")
+            // รอจนกว่า SupabaseManager จะ Initialize เสร็จ (ถ้าโหลดพร้อมกัน)
+            while (!SupabaseManager.Instance.IsInitialized)
             {
-                Debug.LogWarning("[Quiz] Supabase returned empty question list.");
-                onDone(false);
-                yield break;
+                await Task.Delay(100);
             }
+
+            var response = await SupabaseManager.Instance.Client.Rpc("get_active_questions", null);
+            
+            if (response == null || string.IsNullOrEmpty(response.Content) || response.Content == "[]" || response.Content == "null")
+            {
+                Debug.LogWarning("[Quiz] Supabase returned empty question list or failed.");
+                return false;
+            }
+
+            string json = response.Content;
 
             // Supabase RPC คืน JSON array ตรง ๆ — wrap เพื่อ FromJson
             string wrapped = "{\"questions\":" + json + "}";
@@ -222,8 +219,7 @@ public class QuizManager : MonoBehaviour
             if (parsed == null || parsed.questions == null || parsed.questions.Length == 0)
             {
                 Debug.LogWarning("[Quiz] Supabase response parse failed.");
-                onDone(false);
-                yield break;
+                return false;
             }
 
             questionDatabase = new List<QuizQuestion>();
@@ -249,7 +245,12 @@ public class QuizManager : MonoBehaviour
             PlayerPrefs.Save();
 
             GameLog.Log($"<color=lime>[Quiz] Supabase: loaded {questionDatabase.Count} questions & cached.</color>");
-            onDone(true);
+            return true;
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning($"[Quiz] Supabase fetch failed: {e.Message}");
+            return false;
         }
     }
 
