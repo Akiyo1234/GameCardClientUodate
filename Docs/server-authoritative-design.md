@@ -110,10 +110,12 @@ click → build GameAction → (ส่งไป host) → host: ApplyAction(stat
 - ส่วนที่ต้องเขียนใหม่ฝั่ง Unity: RPC transport (Fusion `byte[]`) + ตัวเลือก host
   (player authority = PlayerId ต่ำสุด หรือ headless server) + จุดเรียก RenderFromState
 - ของพร้อมแล้ว: ApplyAction (มี resolveTurn), codec, factory, validator,
-  RenderFromState (bank/players/board/reserved/turn), DRIVE take/buy/reserve
-- ค้าง: noble display update ใน render (score ถูกแล้ว แค่ต้องซ่อนใบที่ claimed);
-  online host-authority drive แบบเต็ม (board replacement ต้อง deterministic ผ่าน core
+  **RenderFromState ครบ** (bank/players/board/reserved/turn/**nobles**), DRIVE take/buy/reserve
+  - noble render = `NobleManager.ClaimByName` ซ่อน visual ใบ claimed โดยไม่บวกคะแนนซ้ำ
+    (คะแนนมาจาก PlayerState.score), idempotent เรียกซ้ำได้
+- ค้าง: online host-authority drive แบบเต็ม (board replacement ต้อง deterministic ผ่าน core
   ไม่ใช่ legacy RNG → ตอนนี้ offline drive ใช้ legacy draw อยู่ ปลอดภัยเพราะกระดาน offline สุ่มอยู่แล้ว)
+  + RPC transport (Fusion byte[]) ตาม flow ด้านบน
 
 หมายเหตุ: เทสต์อยู่ใน Assets/Scripts/Game/Tests (NUnit, EditMode) — รันใน Unity Test Runner ได้
 ตรวจกฎด้วย dotnet ก็ได้ (csproj ชั่วคราว `<Compile Include=".../Game/Core/*.cs"/>` แล้ว `dotnet run`)

@@ -344,9 +344,25 @@ public partial class GameController
         }
     }
 
-    // [TODO R3] อัปเดต display ขุนนางที่ถูก claim (score ของผู้เล่นถูก render ถูกต้องแล้วผ่าน coins/score
-    //           — เหลือแค่ซ่อน NobleDisplay ที่ claimed; ต้องเพิ่ม API ให้ NobleManager claim-by-id)
-    private void RenderNoblesFromState(GameState s) { /* deferred */ }
+    // R3: อัปเดต display ขุนนางที่ถูก claim ตาม state (score ถูก render ผ่าน PlayerState.score แล้ว)
+    //   ซ่อนเฉพาะ "visual" ของใบที่ claimed=true — ไม่บวกคะแนนซ้ำ (NobleManager.ClaimByName)
+    //   matching key = nobleId (= NobleData.nobleName, ตรงกับ BuildCoreGameState). idempotent.
+    private void RenderNoblesFromState(GameState s)
+    {
+        if (s?.nobles == null || nobleManager == null) return;
+        foreach (var noble in s.nobles)
+        {
+            if (noble == null || !noble.claimed) continue;
+
+            string claimer = "ผู้เล่น";
+            int seat = noble.claimedBySeat;
+            if (seat >= 0 && players != null && seat < players.Length
+                && players[seat] != null && players[seat].nameText != null)
+                claimer = players[seat].nameText.text;
+
+            nobleManager.ClaimByName(noble.nobleId, claimer);
+        }
+    }
 
     // composer: วาด state ทั้งหมด (ใช้ตอน drive ซื้อ/จอง และ online sync)
     private void RenderFromState(GameState s)

@@ -113,4 +113,26 @@ public class NobleManager
             }
         }
     }
+
+    /// <summary>
+    /// ซ่อน (mark claimed) ขุนนางตามชื่อ — ใช้ตอน render-from-state (core/host เป็นคน claim)
+    /// ต่างจาก CheckClaim: **ไม่บวกคะแนน** (คะแนนถูก render จาก PlayerState แล้ว) แค่อัปเดต visual + เอาออกจาก active
+    /// idempotent: ถ้าใบนั้นไม่อยู่ใน active แล้ว (เคย claim ไป) → no-op ปลอดภัยเมื่อเรียกซ้ำ
+    /// คืน true ถ้าเพิ่งซ่อนใบนี้, false ถ้าไม่พบ/เคยซ่อนแล้ว
+    /// </summary>
+    public bool ClaimByName(string nobleName, string claimerName)
+    {
+        if (string.IsNullOrEmpty(nobleName)) return false;
+        for (int i = active.Count - 1; i >= 0; i--)
+        {
+            NobleDisplay d = active[i];
+            if (d != null && d.nobleData != null && d.nobleData.nobleName == nobleName)
+            {
+                d.ClaimNoble(claimerName);
+                active.RemoveAt(i);
+                return true;
+            }
+        }
+        return false;
+    }
 }
