@@ -191,6 +191,56 @@ public partial class GameController
         return true;
     }
 
+    // ── drive ซื้อการ์ด: ให้ core คำนวณ payment(เหรียญ/ทอง/black) + score(การ์ด) + bonus แล้วเขียนกลับ ──
+    //   ใช้ resolveTurn:false → core ไม่แตะ noble/win/advance (ปล่อย legacy EndTurn ทำต่อ กันนับซ้ำ)
+    //   ส่วนที่ยังเป็น legacy: ลบการ์ดบนกระดาน/จั่วใบใหม่ (board GameObject), reservedCards list, EndTurn
+    //   คืน true = core เขียนผลแล้ว, false = core ปฏิเสธ → ให้ legacy คำนวณแทน (fallback)
+    private bool DriveBuyViaCore(CardDisplay card, bool fromReserve)
+    {
+        if (card == null || card.data == null) return false;
+        string label = fromReserve ? "BuyReserved" : "Buy";
+
+        GameState state = BuildCoreGameState();
+        int seat = playOrder[currentPlayerIndex];
+        var action = new BuyCardAction { seat = seat, cardId = card.data.cardId, fromReserve = fromReserve };
+        ActionResult result = GameRules.ApplyAction(state, action, CoreCardDb, resolveTurn: false);
+
+        if (!result.ok)
+        {
+            GameLog.Log($"[CoreDrive][{label}] core ปฏิเสธ → fallback legacy. err={result.error}");
+            return false;
+        }
+
+        // เขียนกลับเฉพาะ economy ของผู้เล่นปัจจุบัน + กองกลาง (score การ์ดรวมแล้ว, ยังไม่รวมขุนนาง)
+        RenderBankFromState(result.next);
+        RenderPlayerCoinsFromState(seat, result.next.players[seat]);
+        GameLog.Log($"[CoreDrive][{label}] applied by core (payment/score/bonus)");
+        return true;
+    }
+
+    // ── drive จองการ์ด: ให้ core จัดการ "ได้ทอง 1 (ถ้ากองมี & ถือ<10)" + กองกลาง ──
+    //   resolveTurn:false; ส่วน reservedCards list + spawn GameObject + จั่วการ์ด + EndTurn ยังเป็น legacy
+    private bool DriveReserveViaCore(CardDisplay card)
+    {
+        if (card == null || card.data == null) return false;
+
+        GameState state = BuildCoreGameState();
+        int seat = playOrder[currentPlayerIndex];
+        var action = new ReserveCardAction { seat = seat, cardId = card.data.cardId };
+        ActionResult result = GameRules.ApplyAction(state, action, CoreCardDb, resolveTurn: false);
+
+        if (!result.ok)
+        {
+            GameLog.Log($"[CoreDrive][Reserve] core ปฏิเสธ → fallback legacy. err={result.error}");
+            return false;
+        }
+
+        RenderBankFromState(result.next);
+        RenderPlayerCoinsFromState(seat, result.next.players[seat]);
+        GameLog.Log("[CoreDrive][Reserve] applied by core (gold/bank)");
+        return true;
+    }
+
     // ════════════════════════════════════════════════════════════════════
     // render-from-state — เขียน GameState กลับเข้า UI/scene
     //   ใช้ตอน core ขับเกม (drive) และ online sync (host broadcast → client render) ภายหลัง

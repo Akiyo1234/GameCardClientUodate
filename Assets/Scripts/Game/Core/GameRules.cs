@@ -18,7 +18,10 @@ namespace Game.Core
         // ApplyAction รองรับเฉพาะ "turn action" (หยิบ/ซื้อ/จอง)
         //   ควิซเป็น subsystem แยก ใช้ QuizRules (ไม่จบเทิร์น + ตอบได้ทุกคน ไม่ใช่เฉพาะคนที่ถึงตา)
         //   db จำเป็นสำหรับ Buy/Reserve (TakeCoins ไม่ใช้ → ปล่อย null ได้)
-        public static ActionResult ApplyAction(GameState state, GameAction action, ICardDatabase db = null)
+        //   resolveTurn=true (ปกติ): apply เต็ม — เช็คขุนนาง + เงื่อนไขชนะ + เลื่อนเทิร์น (online/เต็มระบบ)
+        //   resolveTurn=false: apply "เฉพาะ economy/การ์ด" ของ action นี้ ไม่แตะ noble/win/advance
+        //     → ใช้ตอน drive ฝั่ง Unity ที่ยังให้ legacy EndTurn คุม noble/win/turn (กันนับซ้ำ)
+        public static ActionResult ApplyAction(GameState state, GameAction action, ICardDatabase db = null, bool resolveTurn = true)
         {
             if (state == null) return ActionResult.Fail("state is null");
             if (action == null) return ActionResult.Fail("action is null");
@@ -26,9 +29,9 @@ namespace Game.Core
 
             switch (action)
             {
-                case TakeCoinsAction a:   return RequireTurn(state, a) ?? ApplyTakeCoins(state, a);
-                case BuyCardAction a:     return RequireTurn(state, a) ?? ApplyBuyCard(state, a, db);
-                case ReserveCardAction a: return RequireTurn(state, a) ?? ApplyReserveCard(state, a, db);
+                case TakeCoinsAction a:   return RequireTurn(state, a) ?? ApplyTakeCoins(state, a, resolveTurn);
+                case BuyCardAction a:     return RequireTurn(state, a) ?? ApplyBuyCard(state, a, db, resolveTurn);
+                case ReserveCardAction a: return RequireTurn(state, a) ?? ApplyReserveCard(state, a, db, resolveTurn);
                 default:                  return ActionResult.Fail("ApplyAction รองรับเฉพาะ turn action (ควิซใช้ QuizRules)");
             }
         }
@@ -40,7 +43,7 @@ namespace Game.Core
         // ── หยิบเหรียญ ── (แกะกฎจาก GameController.Bank.cs OnResourceClicked + EndTurn commit)
         // กติกา: หยิบ "1-3 สีต่างกัน (สีละ 1)" หรือ "2 เหรียญสีเดียวกัน (กองสีนั้นต้อง ≥ 4)"
         //        ห้ามหยิบทองตรงๆ, ถือรวมต้องไม่เกิน 10, กองกลางต้องมีพอ
-        private static ActionResult ApplyTakeCoins(GameState s, TakeCoinsAction a)
+        private static ActionResult ApplyTakeCoins(GameState s, TakeCoinsAction a, bool resolveTurn = true)
         {
             int[] take = a.coins;
             if (take == null || take.Length != CoinIndex.TotalCount)
@@ -90,7 +93,7 @@ namespace Game.Core
             }
 
             var events = new List<GameEvent> { new GameEvent { type = "CoinsTaken", seat = a.seat } };
-            AdvanceTurn(next);
+            if (resolveTurn) AdvanceTurn(next);
             return ActionResult.Success(next, events);
         }
 
@@ -110,7 +113,7 @@ namespace Game.Core
         // ── ซื้อการ์ด ── (แกะจาก GameController.Cards.cs OnCardClicked / BuyReservedCard)
         //   ต้นทุนจริงต่อสี = max(0, costs[i] - bonuses[i]); ส่วนที่เหรียญสีไม่พอจ่ายด้วย wildcard (ทอง)
         //   ถ้าซื้อจากกระดาน → ดึงการ์ดออก + จั่วใบใหม่ลงช่องเดิม; ถ้าจากที่จอง → ลบออกจากมือ
-        private static ActionResult ApplyBuyCard(GameState s, BuyCardAction a, ICardDatabase db)
+        private static ActionResult ApplyBuyCard(GameState s, BuyCardAction a, ICardDatabase db, bool resolveTurn = true)
         {
             if (db == null) return ActionResult.Fail("ไม่มี card database");
             if (string.IsNullOrEmpty(a.cardId)) return ActionResult.Fail("ไม่ระบุการ์ด");
@@ -158,6 +161,10 @@ namespace Game.Core
 
             var events = new List<GameEvent> { new GameEvent { type = "CardBought", seat = a.seat, cardId = a.cardId } };
 
+            // resolveTurn=false → คืนผลแค่ economy/score(การ์ด)/bonus/การ์ด ให้ legacy EndTurn ทำ noble/win/advance ต่อ
+            if (!resolveTurn)
+                return ActionResult.Success(next, events);
+
             // เช็คขุนนางก่อนเช็คชนะ (ตรงกับ EndTurn เดิม: CheckClaim → EvaluateWinCondition)
             // แต้มขุนนางนับรวมในเงื่อนไขชนะด้วย
             CheckAndAwardNobles(next, np, events);
@@ -177,7 +184,7 @@ namespace Game.Core
 
         // ── จองการ์ด ── (แกะจาก GameController.Cards.cs ExecuteReserve) — จองจากกระดานเท่านั้น
         //   เก็บได้ ≤ 3 ใบ; ได้ทอง 1 ถ้ากองทองมี & ผู้เล่นถือ < 10; ดึงออก + จั่วใบใหม่; ไม่ชนะจากการจอง
-        private static ActionResult ApplyReserveCard(GameState s, ReserveCardAction a, ICardDatabase db)
+        private static ActionResult ApplyReserveCard(GameState s, ReserveCardAction a, ICardDatabase db, bool resolveTurn = true)
         {
             if (db == null) return ActionResult.Fail("ไม่มี card database");
             if (string.IsNullOrEmpty(a.cardId)) return ActionResult.Fail("ไม่ระบุการ์ด");
@@ -205,7 +212,7 @@ namespace Game.Core
             next.board[boardSlot].cardId = DrawCard(next, db, next.board[boardSlot].tier);
 
             var events = new List<GameEvent> { new GameEvent { type = "CardReserved", seat = a.seat, cardId = a.cardId } };
-            AdvanceTurn(next);
+            if (resolveTurn) AdvanceTurn(next);
             return ActionResult.Success(next, events);
         }
 

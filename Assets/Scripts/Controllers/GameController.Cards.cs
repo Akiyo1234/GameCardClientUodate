@@ -49,24 +49,29 @@ public partial class GameController
 
         if (canAfford) {
             if (useCoreValidation) ShadowPredict(new Game.Core.BuyCardAction { seat = playOrder[currentPlayerIndex], cardId = card.data.cardId, fromReserve = false }, "Buy");
-            for (int i = 0; i < 5; i++) {
-                int actualCost = Mathf.Max(0, card.data.costs[i] - p.bonuses[i]);
-                if (p.coins[i] < actualCost) {
-                    int diff = actualCost - p.coins[i];
-                    bankCoins[i] += p.coins[i];
-                    p.coins[i] = 0;
 
-                    int goldCoinsReturned = SpendWildcardCoinsWithoutReturningQuizBlack(p, diff);
-                    bankCoins[5] += goldCoinsReturned;
-                } else {
-                    p.coins[i] -= actualCost;
-                    bankCoins[i] += actualCost;
+            // [Game.Core] ถ้าเปิด drive ให้ core คำนวณ payment/score/bonus; ถ้า core ปฏิเสธ → fallback legacy
+            bool driven = useCoreDrive && DriveBuyViaCore(card, fromReserve: false);
+            if (!driven) {
+                for (int i = 0; i < 5; i++) {
+                    int actualCost = Mathf.Max(0, card.data.costs[i] - p.bonuses[i]);
+                    if (p.coins[i] < actualCost) {
+                        int diff = actualCost - p.coins[i];
+                        bankCoins[i] += p.coins[i];
+                        p.coins[i] = 0;
+
+                        int goldCoinsReturned = SpendWildcardCoinsWithoutReturningQuizBlack(p, diff);
+                        bankCoins[5] += goldCoinsReturned;
+                    } else {
+                        p.coins[i] -= actualCost;
+                        bankCoins[i] += actualCost;
+                    }
                 }
-            }
 
-            p.AddScore(card.data.victoryPoints);
-            p.AddBonus(card.data.bonusType);
-            p.UpdateUI();
+                p.AddScore(card.data.victoryPoints);
+                p.AddBonus(card.data.bonusType);
+                p.UpdateUI();
+            }
 
             Transform parentContainer = card.transform.parent;
             int tier = (parentContainer == tier3Container) ? 3 : (parentContainer == tier2Container) ? 2 : 1;
@@ -156,16 +161,23 @@ public partial class GameController
     {
         PlayerUI p = players[playOrder[currentPlayerIndex]]; // เปลี่ยนเป็นเช็คคนเล่นตามคิว
         if (useCoreValidation) ShadowPredict(new Game.Core.ReserveCardAction { seat = playOrder[currentPlayerIndex], cardId = card.data.cardId }, "Reserve");
+
+        // [Game.Core] ถ้าเปิด drive ให้ core จัดการ bank/ทอง; ถ้า core ปฏิเสธ → fallback legacy
+        bool driven = useCoreDrive && DriveReserveViaCore(card);
+
+        // reservedCards list (ข้อมูลการ์ดจอง) จัดการฝั่ง legacy เสมอ — core ไม่ render รายการนี้
         p.reservedCards.Add(card.data);
 
-        int goldIndex = 5;
-        int totalPlayerCoins = GetTotalPlayerCoins(playOrder[currentPlayerIndex]); // เปลี่ยนเป็นเช็คคนเล่นตามคิว
-        if (bankCoins[goldIndex] > 0 && totalPlayerCoins < 10) {
-            bankCoins[goldIndex]--; p.coins[goldIndex]++; p.UpdateUI();
-        } else if (bankCoins[goldIndex] <= 0) {
-            ShowWarning("จองสำเร็จ! แต่ไม่ได้เหรียญทอง (กองกลางหมด)");
-        } else if (totalPlayerCoins >= 10) {
-            ShowWarning("จองสำเร็จ! แต่ไม่ได้เหรียญทอง (คุณถือเหรียญเต็ม 10 อันแล้ว)");
+        if (!driven) {
+            int goldIndex = 5;
+            int totalPlayerCoins = GetTotalPlayerCoins(playOrder[currentPlayerIndex]); // เปลี่ยนเป็นเช็คคนเล่นตามคิว
+            if (bankCoins[goldIndex] > 0 && totalPlayerCoins < 10) {
+                bankCoins[goldIndex]--; p.coins[goldIndex]++; p.UpdateUI();
+            } else if (bankCoins[goldIndex] <= 0) {
+                ShowWarning("จองสำเร็จ! แต่ไม่ได้เหรียญทอง (กองกลางหมด)");
+            } else if (totalPlayerCoins >= 10) {
+                ShowWarning("จองสำเร็จ! แต่ไม่ได้เหรียญทอง (คุณถือเหรียญเต็ม 10 อันแล้ว)");
+            }
         }
 
         if (p.reservedAreaTransform != null) {
@@ -244,20 +256,27 @@ public partial class GameController
 
         if (canAfford) {
             if (useCoreValidation) ShadowPredict(new Game.Core.BuyCardAction { seat = playOrder[currentPlayerIndex], cardId = card.data.cardId, fromReserve = true }, "BuyReserved");
-            for (int i = 0; i < 5; i++) {
-                int actualCost = Mathf.Max(0, card.data.costs[i] - p.bonuses[i]);
-                if (p.coins[i] < actualCost) {
-                    int diff = actualCost - p.coins[i];
-                    bankCoins[i] += p.coins[i]; p.coins[i] = 0;
-                    int goldCoinsReturned = SpendWildcardCoinsWithoutReturningQuizBlack(p, diff);
-                    bankCoins[5] += goldCoinsReturned;
-                } else {
-                    p.coins[i] -= actualCost; bankCoins[i] += actualCost;
+
+            // [Game.Core] ถ้าเปิด drive ให้ core คำนวณ payment/score/bonus; ถ้า core ปฏิเสธ → fallback legacy
+            bool driven = useCoreDrive && DriveBuyViaCore(card, fromReserve: true);
+            if (!driven) {
+                for (int i = 0; i < 5; i++) {
+                    int actualCost = Mathf.Max(0, card.data.costs[i] - p.bonuses[i]);
+                    if (p.coins[i] < actualCost) {
+                        int diff = actualCost - p.coins[i];
+                        bankCoins[i] += p.coins[i]; p.coins[i] = 0;
+                        int goldCoinsReturned = SpendWildcardCoinsWithoutReturningQuizBlack(p, diff);
+                        bankCoins[5] += goldCoinsReturned;
+                    } else {
+                        p.coins[i] -= actualCost; bankCoins[i] += actualCost;
+                    }
                 }
+
+                p.AddScore(card.data.victoryPoints);
+                p.AddBonus(card.data.bonusType);
             }
 
-            p.AddScore(card.data.victoryPoints);
-            p.AddBonus(card.data.bonusType);
+            // reservedCards list (ข้อมูลการ์ดจอง) จัดการฝั่ง legacy เสมอ — core ไม่ render รายการนี้
             p.reservedCards.Remove(card.data);
             p.UpdateUI();
 
