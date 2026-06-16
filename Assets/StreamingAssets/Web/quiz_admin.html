@@ -378,6 +378,9 @@
       <div class="nav-item" data-page="upload" id="navUpload">
         <span class="nav-icon">⬆️</span> อัปโหลด Patch ใหม่
       </div>
+      <div class="nav-item" data-page="manage" id="navManage">
+        <span class="nav-icon">📝</span> จัดการคำถาม
+      </div>
       <div class="nav-section">ข้อมูล</div>
       <div class="nav-item" data-page="guide" id="navGuide">
         <span class="nav-icon">📋</span> รูปแบบไฟล์ JSON
@@ -493,6 +496,98 @@
                 <tbody id="previewBody"></tbody>
               </table>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─── Page: Manage ─── -->
+      <div class="page" id="pageManage">
+        <div class="page-header">
+          <h1>📝 จัดการคำถามแบบ Manual</h1>
+          <p>เพิ่ม แก้ไข หรือลบคำถามทีละข้อได้จากที่นี่</p>
+        </div>
+
+        <div class="section">
+          <div class="section-title">ฟอร์มเพิ่ม/แก้ไขคำถาม</div>
+          <div style="background:var(--card);border:1px solid var(--border);border-radius:14px;padding:24px;">
+            <div class="form-group" style="margin-bottom:14px">
+              <label>โจทย์คำถาม *</label>
+              <textarea id="m_question" rows="2" placeholder="ใส่โจทย์คำถาม..."></textarea>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><label>ตัวเลือก ก.</label><input type="text" id="m_c0" placeholder="ตัวเลือก 1"></div>
+              <div class="form-group"><label>ตัวเลือก ข.</label><input type="text" id="m_c1" placeholder="ตัวเลือก 2"></div>
+              <div class="form-group"><label>ตัวเลือก ค.</label><input type="text" id="m_c2" placeholder="ตัวเลือก 3"></div>
+              <div class="form-group"><label>ตัวเลือก ง.</label><input type="text" id="m_c3" placeholder="ตัวเลือก 4"></div>
+            </div>
+            <div class="form-row" style="margin-top:14px">
+              <div class="form-group">
+                <label>เฉลย (ก-ง)</label>
+                <select id="m_correct" style="background:rgba(0,0,0,.3);border:1px solid var(--border);border-radius:10px;padding:10px;color:var(--text);font-family:'Bai Jamjuree'">
+                  <option value="0">ก. (ตัวเลือก 1)</option>
+                  <option value="1">ข. (ตัวเลือก 2)</option>
+                  <option value="2">ค. (ตัวเลือก 3)</option>
+                  <option value="3">ง. (ตัวเลือก 4)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>หมวดหมู่</label>
+                <select id="m_category" style="background:rgba(0,0,0,.3);border:1px solid var(--border);border-radius:10px;padding:10px;color:var(--text);font-family:'Bai Jamjuree'">
+                  <option value="ระบบสารสนเทศ">🖥️ ระบบสารสนเทศ (IS)</option>
+                  <option value="ฐานข้อมูล">🗄️ ฐานข้อมูล (Database)</option>
+                  <option value="เครือข่ายและความปลอดภัย">🌐 เครือข่าย &amp; ความปลอดภัย</option>
+                  <option value="ธุรกิจและกลยุทธ์">💼 ธุรกิจ &amp; กลยุทธ์</option>
+                  <option value="การพัฒนาซอฟต์แวร์">💻 การพัฒนาซอฟต์แวร์</option>
+                  <option value="คลาวด์และเทคโนโลยีใหม่">☁️ คลาวด์ &amp; เทคโนโลยีใหม่</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>ระดับความยาก</label>
+                <select id="m_difficulty" style="background:rgba(0,0,0,.3);border:1px solid var(--border);border-radius:10px;padding:10px;color:var(--text);font-family:'Bai Jamjuree'">
+                  <option value="easy">ง่าย (Easy)</option>
+                  <option value="medium" selected>ปานกลาง (Medium)</option>
+                  <option value="hard">ยาก (Hard)</option>
+                </select>
+              </div>
+            </div>
+            <div style="margin-top:20px;text-align:right;">
+              <input type="hidden" id="m_editingId" value="">
+              <button class="btn btn-ghost" id="m_cancelBtn" style="display:none;" onclick="cancelEditMode()">ยกเลิกการแก้ไข</button>
+              <button class="btn btn-primary" id="m_saveBtn" onclick="saveManualQuestion()">💾 บันทึกคำถาม</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="section-title">รายการคำถามทั้งหมด (Data Table)</div>
+          <div style="display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
+            <input type="text" id="m_searchInput" placeholder="🔍 ค้นหาคำถาม..." onkeyup="filterQuestions()" style="flex:1;min-width:200px;background:rgba(0,0,0,.3);border:1px solid var(--border);border-radius:10px;padding:10px 14px;color:var(--text);font-family:'Bai Jamjuree';outline:none">
+            <select id="m_filterCategory" onchange="filterQuestions()" style="background:rgba(0,0,0,.3);border:1px solid var(--border);border-radius:10px;padding:10px 14px;color:var(--text);font-family:'Bai Jamjuree'">
+              <option value="">📂 ทุกหมวดหมู่</option>
+              <option value="ระบบสารสนเทศ">🖥️ ระบบสารสนเทศ</option>
+              <option value="ฐานข้อมูล">🗄️ ฐานข้อมูล</option>
+              <option value="เครือข่ายและความปลอดภัย">🌐 เครือข่าย &amp; ความปลอดภัย</option>
+              <option value="ธุรกิจและกลยุทธ์">💼 ธุรกิจ &amp; กลยุทธ์</option>
+              <option value="การพัฒนาซอฟต์แวร์">💻 การพัฒนาซอฟต์แวร์</option>
+              <option value="คลาวด์และเทคโนโลยีใหม่">☁️ คลาวด์ &amp; เทคโนโลยีใหม่</option>
+            </select>
+            <span id="m_questionCount" style="font-size:12px;color:var(--muted)">โหลดอยู่...</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>โจทย์</th>
+                  <th>ตัวเลือก / เฉลย</th>
+                  <th>หมวด/ระดับ</th>
+                  <th style="width:100px;text-align:center;">จัดการ</th>
+                </tr>
+              </thead>
+              <tbody id="manageTableBody">
+                <tr><td colspan="5" style="text-align:center">กำลังโหลด...</td></tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
@@ -641,6 +736,7 @@
         document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
         document.getElementById('page' + page.charAt(0).toUpperCase() + page.slice(1)).classList.add('active');
         if (page === 'patches') loadPatches();
+        if (page === 'manage') loadAllQuestions();
       });
     });
 
@@ -750,29 +846,297 @@
         document.getElementById('modalBody').innerHTML = '<div class="empty-state"><div class="empty-icon">📭</div><div class="empty-text">ไม่มีคำถามใน Patch นี้</div></div>';
         return;
       }
+
+      const catColor = {
+        'ระบบสารสนเทศ':       '#00f3ff',
+        'ฐานข้อมูล':            '#bc13fe',
+        'เครือข่ายและความปลอดภัย': '#ff9500',
+        'ธุรกิจและกลยุทธ์':     '#ffd700',
+        'การพัฒนาซอฟต์แวร์':  '#00ff88',
+        'คลาวด์และเทคโนโลยีใหม่': '#ff6eb4',
+      };
+
       document.getElementById('modalBody').innerHTML = `
-        <div style="margin-bottom:12px"><span class="badge">${data.length} คำถาม</span></div>
+        <div style="margin-bottom:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <span class="badge">${data.length} คำถาม</span>
+          <span style="font-size:11px;color:var(--muted)">คลิกแถวเพื่อดูตัวเลือกทั้งหมด</span>
+        </div>
         <div class="table-wrap">
-          <table>
-            <thead><tr><th>#</th><th>คำถาม</th><th>หมวด</th><th>ระดับ</th><th>เฉลย</th></tr></thead>
+          <table style="table-layout:fixed;width:100%">
+            <colgroup>
+              <col style="width:40px">
+              <col style="width:45%">
+              <col style="width:130px">
+              <col style="width:80px">
+              <col style="width:22%">
+            </colgroup>
+            <thead><tr>
+              <th style="text-align:center">#</th>
+              <th>คำถาม</th>
+              <th>หมวดหมู่</th>
+              <th>ระดับ</th>
+              <th>เฉลย</th>
+            </tr></thead>
             <tbody>
-              ${data.map((q,i) => `
-                <tr>
-                  <td style="color:var(--muted)">${i+1}</td>
-                  <td class="q-text">${esc(q.question)}</td>
-                  <td><span class="badge" style="font-size:10px">${esc(q.category)}</span></td>
-                  <td>${diffBadge(q.difficulty)}</td>
-                  <td class="correct">${Array.isArray(q.choices) ? esc(q.choices[q.correct_index] || '-') : (JSON.parse(q.choices||'[]')[q.correct_index]||'-')}</td>
-                </tr>
-              `).join('')}
+              ${data.map((q, i) => {
+                let choicesArr = [];
+                try { choicesArr = Array.isArray(q.choices) ? q.choices : JSON.parse(q.choices||'[]'); } catch(e){}
+                const answerText = choicesArr[q.correct_index] || '-';
+                const catClr = catColor[q.category] || 'var(--primary)';
+                return `
+                  <tr style="cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'||!this.nextElementSibling.style.display?'table-row':'none'">
+                    <td style="color:var(--muted);text-align:center">${i+1}</td>
+                    <td style="white-space:normal;word-break:break-word;line-height:1.4">${esc(q.question)}</td>
+                    <td>
+                      <span style="display:inline-block;padding:3px 8px;border-radius:20px;font-size:10px;font-weight:600;white-space:normal;word-break:break-all;line-height:1.3;border:1px solid ${catClr}40;color:${catClr};background:${catClr}15">
+                        ${esc(q.category||'ทั่วไป')}
+                      </span>
+                    </td>
+                    <td>${diffBadge(q.difficulty)}</td>
+                    <td style="color:var(--green);font-weight:600;word-break:break-word">${esc(answerText)}</td>
+                  </tr>
+                  <tr style="display:none;background:rgba(0,243,255,.04)">
+                    <td></td>
+                    <td colspan="4" style="padding:10px 0 10px 8px">
+                      <div style="font-size:11px;color:var(--muted);margin-bottom:6px">ตัวเลือกทั้งหมด:</div>
+                      ${choicesArr.map((c,ci)=>`
+                        <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:4px">
+                          <span style="font-size:11px;color:${ci===q.correct_index?'var(--green)':'var(--muted)'};font-weight:600;flex-shrink:0">
+                            ${['ก','ข','ค','ง'][ci]||ci+1}.
+                          </span>
+                          <span style="font-size:12px;color:${ci===q.correct_index?'var(--green)':'var(--text)'}">${esc(c)}</span>
+                          ${ci===q.correct_index?'<span style="font-size:10px;color:var(--green)">✓ เฉลย</span>':''}
+                        </div>
+                      `).join('')}
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
             </tbody>
           </table>
         </div>
       `;
     }
 
+
     document.getElementById('closeModal').addEventListener('click', () => document.getElementById('viewModal').classList.remove('show'));
     document.getElementById('viewModal').addEventListener('click', e => { if (e.target === e.currentTarget) e.currentTarget.classList.remove('show'); });
+
+    // ────────────────────────────────
+    //  Manage Questions (Manual)
+    // ────────────────────────────────
+    let allManageQuestions = [];
+
+    async function loadAllQuestions() {
+      document.getElementById('manageTableBody').innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted)">⏳ กำลังโหลด...</td></tr>';
+      document.getElementById('m_questionCount').textContent = 'กำลังโหลด...';
+      const { data, error } = await sb.from('quiz_questions').select('*').order('id', { ascending: false });
+      if (error) {
+        console.error(error);
+        return;
+      }
+      allManageQuestions = data || [];
+      document.getElementById('m_questionCount').textContent = `ทั้งหมด ${allManageQuestions.length} คำถาม`;
+      renderManageTable(allManageQuestions);
+    }
+
+    function renderManageTable(list) {
+      const tbody = document.getElementById('manageTableBody');
+      document.getElementById('m_questionCount').textContent = `แสดง ${list.length} / ${allManageQuestions.length} คำถาม`;
+      if (!list.length) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--muted)">ไม่พบคำถาม</td></tr>';
+        return;
+      }
+
+      const catColor = {
+        'ระบบสารสนเทศ':       '#00f3ff',
+        'ฐานข้อมูล':            '#bc13fe',
+        'เครือข่ายและความปลอดภัย': '#ff9500',
+        'ธุรกิจและกลยุทธ์':     '#ffd700',
+        'การพัฒนาซอฟต์แวร์':  '#00ff88',
+        'คลาวด์และเทคโนโลยีใหม่': '#ff6eb4',
+      };
+
+      tbody.innerHTML = list.map((q, i) => {
+        let choicesArr = [];
+        try { choicesArr = Array.isArray(q.choices) ? q.choices : JSON.parse(q.choices||'[]'); } catch(e){}
+        const catClr = catColor[q.category] || 'var(--primary)';
+        return `
+          <tr>
+            <td style="color:var(--muted)">${q.id}</td>
+            <td class="q-text" style="max-width:250px" title="${esc(q.question)}">${esc(q.question)}</td>
+            <td>
+               <div style="font-size:11px;color:var(--muted);white-space:normal;word-break:break-word;line-height:1.4">
+                 1.${esc(choicesArr[0]||'-')} 2.${esc(choicesArr[1]||'-')} 3.${esc(choicesArr[2]||'-')} 4.${esc(choicesArr[3]||'-')}
+               </div>
+               <div style="color:var(--green);font-size:11px;margin-top:2px;font-weight:600">เฉลย: ${esc(choicesArr[q.correct_index]||'-')}</div>
+            </td>
+            <td>
+               <div style="margin-bottom:6px">
+                 <span style="display:inline-block;padding:3px 8px;border-radius:20px;font-size:10px;font-weight:600;white-space:normal;word-break:break-word;line-height:1.3;border:1px solid ${catClr}40;color:${catClr};background:${catClr}15">
+                   ${esc(q.category||'ทั่วไป')}
+                 </span>
+               </div>
+               <div>${diffBadge(q.difficulty)}</div>
+            </td>
+            <td style="text-align:center;">
+              <button class="icon-btn view" style="display:inline-flex;width:28px;height:28px" onclick='editManualQuestion(${JSON.stringify(q).replace(/'/g,"&#39;")})'>✏️</button>
+              <button class="icon-btn del" style="display:inline-flex;width:28px;height:28px;margin-left:4px" onclick="deleteManualQuestion(${q.id})">🗑</button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function filterQuestions() {
+      const q = document.getElementById('m_searchInput').value.toLowerCase();
+      const cat = document.getElementById('m_filterCategory').value;
+      const filtered = allManageQuestions.filter(item => 
+        ((item.question || '').toLowerCase().includes(q) ||
+        (item.category || '').toLowerCase().includes(q)) &&
+        (!cat || item.category === cat)
+      );
+      renderManageTable(filtered);
+    }
+
+    async function saveManualQuestion() {
+      const question = document.getElementById('m_question').value.trim();
+      const c0 = document.getElementById('m_c0').value.trim();
+      const c1 = document.getElementById('m_c1').value.trim();
+      const c2 = document.getElementById('m_c2').value.trim();
+      const c3 = document.getElementById('m_c3').value.trim();
+      const correct_index = parseInt(document.getElementById('m_correct').value);
+      const category = document.getElementById('m_category').value;
+      const difficulty = document.getElementById('m_difficulty').value;
+      const editingId = document.getElementById('m_editingId').value;
+
+      if (!question || !c0 || !c1 || !c2 || !c3) {
+        Swal.fire({ icon:'warning', title:'กรอกข้อมูลให้ครบ', text:'ต้องระบุโจทย์และตัวเลือกทั้ง 4 ข้อ', confirmButtonColor:'#00f3ff' });
+        return;
+      }
+
+      const payload = {
+        question,
+        choices: [c0, c1, c2, c3],
+        correct_index,
+        category,
+        difficulty
+      };
+
+      document.getElementById('m_saveBtn').disabled = true;
+      document.getElementById('m_saveBtn').textContent = '⏳ กำลังบันทึก...';
+
+      let err;
+      if (editingId) {
+        // แก้ไขคำถามที่มีอยู่
+        const { error } = await sb.from('quiz_questions').update(payload).eq('id', editingId);
+        err = error;
+      } else {
+        // เพิ่มใหม่: หา/สร้าง patch สำหรับ "Manual Entry" ก่อน
+        const patchId = await getOrCreateManualPatch();
+        if (patchId === null) {
+          document.getElementById('m_saveBtn').disabled = false;
+          document.getElementById('m_saveBtn').innerHTML = '💾 บันทึกคำถาม';
+          Swal.fire({ icon:'error', title:'ไม่สามารถหา Patch ได้', text:'โปรดลองใหม่อีกครั้ง', confirmButtonColor:'#ff3366' });
+          return;
+        }
+        payload.patch_id = patchId;
+        const { error } = await sb.from('quiz_questions').insert(payload);
+        if (!error) {
+          // อัปเดตจำนวนคำถามใน patch
+          await sb.from('quiz_patches').update({ total_questions: await countPatchQuestions(patchId) }).eq('id', patchId);
+        }
+        err = error;
+      }
+
+      document.getElementById('m_saveBtn').disabled = false;
+      document.getElementById('m_saveBtn').innerHTML = '💾 บันทึกคำถาม';
+
+      if (err) {
+        Swal.fire({ icon:'error', title:'บันทึกไม่สำเร็จ', text: err.message, confirmButtonColor:'#ff3366' });
+      } else {
+        Swal.fire({ icon:'success', title:'บันทึกเรียบร้อย', timer:1500, showConfirmButton:false });
+        cancelEditMode();
+        loadAllQuestions();
+      }
+    }
+
+    // ─── หา Manual Entry Patch หรือสร้างใหม่ถ้ายังไม่มี ───────────────────
+    async function getOrCreateManualPatch() {
+      // ค้นหาก่อน
+      const { data, error } = await sb.from('quiz_patches').select('id').eq('name', 'Manual Entry').maybeSingle();
+      if (error) { console.error('[Patch] error:', error); return null; }
+      if (data) return data.id;
+
+      // สร้างใหม่
+      const { data: created, error: createErr } = await sb.from('quiz_patches')
+        .insert({ name: 'Manual Entry', description: 'คำถามที่เพิ่มทีละข้อผ่านหน้าจัดการ', is_active: true, total_questions: 0, updated_at: new Date().toISOString() })
+        .select('id').single();
+      if (createErr) { console.error('[Patch] create error:', createErr); return null; }
+      return created.id;
+    }
+
+    // ─── นับจำนวนคำถามใน Patch ────────────────────────────────────────────
+    async function countPatchQuestions(patchId) {
+      const { count } = await sb.from('quiz_questions').select('*', { count: 'exact', head: true }).eq('patch_id', patchId);
+      return count || 0;
+    }
+
+    function editManualQuestion(q) {
+      let choicesArr = [];
+      try { choicesArr = Array.isArray(q.choices) ? q.choices : JSON.parse(q.choices||'[]'); } catch(e){}
+      
+      document.getElementById('m_editingId').value = q.id;
+      document.getElementById('m_question').value = q.question || '';
+      document.getElementById('m_c0').value = choicesArr[0] || '';
+      document.getElementById('m_c1').value = choicesArr[1] || '';
+      document.getElementById('m_c2').value = choicesArr[2] || '';
+      document.getElementById('m_c3').value = choicesArr[3] || '';
+      document.getElementById('m_correct').value = q.correct_index || 0;
+      document.getElementById('m_category').value = q.category || '';
+      document.getElementById('m_difficulty').value = q.difficulty || 'medium';
+
+      document.getElementById('m_cancelBtn').style.display = 'inline-flex';
+      document.getElementById('m_saveBtn').innerHTML = '💾 บันทึกการแก้ไข';
+      window.scrollTo({top: 0, behavior: 'smooth'});
+    }
+
+    function cancelEditMode() {
+      document.getElementById('m_editingId').value = '';
+      document.getElementById('m_question').value = '';
+      document.getElementById('m_c0').value = '';
+      document.getElementById('m_c1').value = '';
+      document.getElementById('m_c2').value = '';
+      document.getElementById('m_c3').value = '';
+      document.getElementById('m_correct').value = 0;
+      document.getElementById('m_category').value = '';
+      document.getElementById('m_difficulty').value = 'medium';
+
+      document.getElementById('m_cancelBtn').style.display = 'none';
+      document.getElementById('m_saveBtn').innerHTML = '💾 บันทึกคำถาม';
+    }
+
+    async function deleteManualQuestion(id) {
+      const r = await Swal.fire({
+        title: `ยืนยันการลบ?`,
+        text: 'คุณแน่ใจหรือไม่ว่าจะลบคำถามข้อนี้?',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'ลบเลย',
+        cancelButtonText: 'ยกเลิก',
+        confirmButtonColor: '#ff3366',
+        cancelButtonColor: '#334155'
+      });
+      if (!r.isConfirmed) return;
+
+      const { error } = await sb.from('quiz_questions').delete().eq('id', id);
+      if (error) { 
+        Swal.fire({ icon:'error', title:'ลบไม่สำเร็จ', text: error.message, confirmButtonColor:'#ff3366' }); 
+      } else {
+        Swal.fire({ icon:'success', title:'ลบเรียบร้อย', timer:1500, showConfirmButton:false });
+        loadAllQuestions();
+      }
+    }
 
     // ────────────────────────────────
     //  File Upload & Parse

@@ -15,7 +15,10 @@ public class DailyQuizManager : MonoBehaviour
     [Header("---- UI Panels ----")]
     [SerializeField] private GameObject quizPanel;
     [SerializeField] private GameObject resultPanel;
-    [SerializeField] private GameObject alreadyPlayedPanel;
+    [UnityEngine.Serialization.FormerlySerializedAs("alreadyPlayedPanel")]
+    [SerializeField] private GameObject warningPanel;
+    [SerializeField] private TextMeshProUGUI warningMessageText;
+    [SerializeField] private Button startDailyQuizBtn;
     [SerializeField] private CanvasGroup mainCanvasGroup;
 
     [Header("---- Question UI ----")]
@@ -91,7 +94,7 @@ public class DailyQuizManager : MonoBehaviour
         // สลับ BGM มาใช้เพลงเกม
         AudioManager.Instance?.PlayGameBGM();
         InitializeUI();
-        CheckDailyStatus();
+        ShowWarningPanel();
     }
 
     // ───── ดึงคำถามที่ยังไม่เคยตอบจาก Supabase แล้ว fallback เป็น local random ─────
@@ -164,7 +167,7 @@ public class DailyQuizManager : MonoBehaviour
 
         if (quizPanel != null) quizPanel.SetActive(false);
         if (resultPanel != null) resultPanel.SetActive(false);
-        if (alreadyPlayedPanel != null) alreadyPlayedPanel.SetActive(false);
+        if (warningPanel != null) warningPanel.SetActive(false);
         
         if (mainCanvasGroup != null)
         {
@@ -189,26 +192,45 @@ public class DailyQuizManager : MonoBehaviour
         }
     }
 
-    private async void CheckDailyStatus()
+    private async void ShowWarningPanel()
     {
-        // ด่านกันเล่นซ้ำชั้นแรก (local) — กันกรณีตอบผิด/หมดเวลาแล้วเปิดเข้ามาใหม่
-        // ก่อน server จะ sync ทัน (MarkAsPlayed เขียนค่านี้ทุกครั้งที่ตอบ ทั้งถูก/ผิด/หมดเวลา)
-        if (PlayerPrefs.GetString("LastDailyQuizDate", "") == DateTime.Now.ToString("yyyy-MM-dd"))
+        if (warningPanel != null) warningPanel.SetActive(true);
+        if (startDailyQuizBtn != null) startDailyQuizBtn.gameObject.SetActive(false);
+        if (warningMessageText != null)
         {
-            ShowAlreadyPlayed();
-            return;
+            warningMessageText.text = "กำลังตรวจสอบสิทธิ์การตอบคำถาม...";
         }
 
         bool hasClaimed = await PlayerDataService.HasClaimedDailyQuizTodayAsync();
 
         if (hasClaimed)
         {
-            ShowAlreadyPlayed();
+            ShowAlreadyPlayedWarning();
         }
         else
         {
-            LoadQuestionsAndStart();
+            if (warningMessageText != null)
+            {
+                warningMessageText.text = "นี่คือระบบตอบคำถามประจำวัน!\n\nตอบคำถามเพื่อรับรางวัล Gem\nหากพร้อมแล้ว กดเริ่มตอบได้เลย!";
+            }
+            
+            if (startDailyQuizBtn != null)
+            {
+                startDailyQuizBtn.gameObject.SetActive(true);
+                startDailyQuizBtn.interactable = true;
+                startDailyQuizBtn.onClick.RemoveAllListeners();
+                startDailyQuizBtn.onClick.AddListener(OnStartDailyQuizClicked);
+            }
         }
+    }
+
+    private void OnStartDailyQuizClicked()
+    {
+        AudioManager.Instance?.PlayButtonClick();
+        if (startDailyQuizBtn != null) startDailyQuizBtn.interactable = false;
+        
+        if (warningPanel != null) warningPanel.SetActive(false);
+        LoadQuestionsAndStart();
     }
 
     private void LoadQuestionsAndStart()
@@ -434,11 +456,21 @@ public class DailyQuizManager : MonoBehaviour
         GameLog.Log($"[DailyQuiz] Category: {category} (Force Updated all Text components to {targetColor})");
     }
 
-    private void ShowResult(bool success, string customMsg = "")
+    private async void ShowResult(bool success, string customMsg = "")
     {
         if (quizPanel != null) quizPanel.SetActive(false);
         if (resultPanel != null) resultPanel.SetActive(true);
         
+        // ยิง request บันทึกคำตอบไปที่ server เลย (สำคัญมากเพื่อกันปั๊มตอบซ้ำ!)
+        var (ok, msg, gems) = await PlayerDataService.SubmitDailyQuizAnswerAsync(success, gemReward);
+
+        // ถ้า server ปฏิเสธ (เช่น ตอบไปแล้ววันนี้) ก็จับปรับเป็นผิดไม่ได้รางวัล
+        if (!ok)
+        {
+            success = false;
+            customMsg = string.IsNullOrEmpty(msg) ? "เกิดข้อผิดพลาดในการส่งคำตอบ" : msg;
+        }
+
         if (success)
         {
             // หัวข้อแสดงผลชัดเจน สีเขียว
@@ -447,28 +479,22 @@ public class DailyQuizManager : MonoBehaviour
             
             resultMessageText.text = "เก่งมาก! คุณได้รับรางวัลจากการตอบคำถามประจำวัน";
             resultMessageText.color = Color.white;
-            rewardText.text = $"รับรางวัลพิเศษ {gemReward} Gems";
+            rewardText.text = $"รับรางวัลพิเศษ {gems} Gems";
             
-            // Trigger Effects (เสียง correct/wrong ถูกเล่นไปแล้วใน SubmitDailyAnswer ผ่าน AudioManager
-            // อย่าเล่นซ้ำที่นี่ — เคยทำให้เสียงดัง 2 ครั้งทับกัน)
+            // Trigger Effects
             if (confettiParticles != null) confettiParticles.Play();
 
-            // อัปเดต local เพื่อโชว์ผลทันที (optimistic)
+            // อัปเดต local (optimistic)
             if (CurrencyManager.Instance != null)
             {
-                CurrencyManager.Instance.AddGems(gemReward);
+                CurrencyManager.Instance.AddGems(gems);
             }
             else
             {
-                int newTotal = PlayerPrefs.GetInt("TotalGems", 0) + gemReward;
+                int newTotal = PlayerPrefs.GetInt("TotalGems", 0) + gems;
                 PlayerPrefs.SetInt("TotalGems", newTotal);
                 PlayerPrefs.Save();
             }
-
-            // เขียน DB แบบ server-authoritative: server กำหนดจำนวน + กันรับซ้ำ/วัน
-            // (ถ้า server ปฏิเสธ เช่นรับไปแล้ววันนี้ ค่าจะถูก reconcile ตอนโหลดโปรไฟล์ครั้งถัดไป)
-            // ส่ง question_id ให้ server บันทึกลง quiz_history (daily_quiz_claims.question_id)
-            _ = PlayerDataService.GrantQuizRewardAsync(_currentQuestionId);
         }
         else
         {
@@ -479,17 +505,19 @@ public class DailyQuizManager : MonoBehaviour
             resultMessageText.text = string.IsNullOrEmpty(customMsg) ? "คำตอบยังไม่ถูกต้อง พรุ่งนี้ลองใหม่นะ!" : customMsg;
             resultMessageText.color = new Color(1f, 0.8f, 0.8f); // สีขาวอมแดงจางๆ
             rewardText.text = "สู้ๆ นะ! ไว้ลองใหม่วันพรุ่งนี้";
-            // (เสียง wrong เล่นไปแล้วที่ SubmitDailyAnswer — ไม่เล่นซ้ำ)
-
-            // บันทึกการตอบผิด/หมดเวลาลง server (ไม่ให้รางวัล) เพื่อล็อก 1 ครั้ง/วันให้นับรวมการตอบผิดด้วย
-            // กรณีตอบถูกไม่ต้องเรียกที่นี่ — grant-quiz-reward ใส่ claim row ให้แล้ว (กัน insert ชนกันจน reward ไม่เข้า)
-            _ = PlayerDataService.RecordQuizAttemptAsync();
         }
     }
 
-    private void ShowAlreadyPlayed()
+    private void ShowAlreadyPlayedWarning()
     {
-        if (alreadyPlayedPanel != null) alreadyPlayedPanel.SetActive(true);
+        if (warningMessageText != null)
+        {
+            warningMessageText.text = "คุณได้ตอบคำถามประจำวันไปแล้ว\n\nมาตอบใหม่พรุ่งนี้แทนนะ!";
+        }
+        if (startDailyQuizBtn != null)
+        {
+            startDailyQuizBtn.gameObject.SetActive(false);
+        }
     }
 
     public void BackToMainMenu()
