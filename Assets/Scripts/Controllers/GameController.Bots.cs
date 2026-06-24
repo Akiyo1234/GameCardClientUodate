@@ -56,7 +56,10 @@ public partial class GameController
 
     IEnumerator RunBotTurnAfterDelay()
     {
-        float delay = Random.Range(botTurnDelayMin, botTurnDelayMax);
+        bool isTutorial = UnityEngine.Object.FindAnyObjectByType<TutorialManager>() != null;
+        float minDelay = isTutorial ? tutorialBotTurnDelayMin : botTurnDelayMin;
+        float maxDelay = isTutorial ? tutorialBotTurnDelayMax : botTurnDelayMax;
+        float delay = Random.Range(minDelay, maxDelay);
         yield return new WaitForSeconds(delay);
         botTurnCoroutine = null;
 

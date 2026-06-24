@@ -125,7 +125,7 @@ public partial class GameController
         return true;
     }
 
-    private bool IsLocalPlayersTurn()
+    public bool IsLocalPlayersTurn()
     {
         if (players == null || players.Length == 0) return false;
         if (playOrder == null || playOrder.Length == 0) return false;

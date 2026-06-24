@@ -34,7 +34,7 @@ public partial class GameController
         ClearWarning();
     }
 
-    int GetTotalPendingCoins()
+    public int GetTotalPendingCoins()
     {
         int total = 0;
         for (int i = 0; i < 5; i++) total += pendingCoins[i];
@@ -60,12 +60,14 @@ public partial class GameController
 
     public void OnResourceClicked(ResourceButton clickedBtn)
     {
-        if (BlockActionDuringQuiz()) return;
-        if (BlockActionUntilContinue()) return;
-        if (BlockActionOutsideLocalTurn()) return;
-        if (isGameOver) return;
+        GameLog.Log($"[OnResourceClicked] Started for {clickedBtn.resourceType}");
+        if (BlockActionDuringQuiz()) { GameLog.Log("[OnResourceClicked] Blocked by BlockActionDuringQuiz"); return; }
+        if (BlockActionUntilContinue()) { GameLog.Log("[OnResourceClicked] Blocked by BlockActionUntilContinue"); return; }
+        if (BlockActionOutsideLocalTurn()) { GameLog.Log("[OnResourceClicked] Blocked by BlockActionOutsideLocalTurn"); return; }
+        if (isGameOver) { GameLog.Log("[OnResourceClicked] Blocked by isGameOver"); return; }
         if (IsCurrentPlayerBot() && !isExecutingBotTurn) {
             ShowWarning("กำลังเป็นเทิร์นของบอท");
+            GameLog.Log("[OnResourceClicked] Blocked by IsCurrentPlayerBot");
             return;
         }
 
@@ -112,16 +114,20 @@ public partial class GameController
                 return;
             }
             pendingCoins[index]++;
+            GameLog.Log($"[OnResourceClicked] Picked second coin of index {index}");
         } else if (pendingCoins[index] == 0) {
             if (totalPending >= 3) {
                 ShowWarning("คุณหยิบเหรียญครบ 3 สีแล้ว!");
                 return;
             }
             pendingCoins[index]++;
+            GameLog.Log($"[OnResourceClicked] Picked first coin of index {index}. Total Pending: {GetTotalPendingCoins()}");
         }
 
         ClearWarning();
         clickedBtn.UpdatePendingUI(pendingCoins[index]);
+        UpdateBankUI();
+        UpdateTurnVisuals();
     }
 
     // ───────── Setup / configuration ─────────

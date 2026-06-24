@@ -119,6 +119,7 @@ public class QuizManager : MonoBehaviour
     private readonly List<PlayerAnswer> currentAnswers = new List<PlayerAnswer>();
 
     public bool IsQuizActive => isQuizActive;
+    public bool HasLocalPlayerAnswered => localAnswered;
 
     private void Awake()
     {
@@ -480,6 +481,14 @@ public class QuizManager : MonoBehaviour
         bool isCorrect = (choiceIndex == currentQuestion.correctChoiceIndex);
         float timeTaken = timeLimit - currentTime;
 
+        // [Tutorial Mode] โกงเวลาให้ผู้เล่นตอบเร็วที่สุดเสมอ (0.001 วิ) เพื่อให้ได้เป็นคนเริ่มเทิร์นแรกแน่นอน
+        // และโกงให้ตอบถูกเสมอ ไม่ว่าจะกดข้อไหนก็ตาม เพื่อไม่ให้ขัดจังหวะการสอน
+        if (UnityEngine.Object.FindAnyObjectByType<TutorialManager>() != null)
+        {
+            timeTaken = 0.001f;
+            isCorrect = true;
+        }
+
         // บันทึกคำตอบของเรา
         currentAnswers.Add(new PlayerAnswer
         {
@@ -582,8 +591,8 @@ public class QuizManager : MonoBehaviour
         botHasAnswered = new bool[totalPlayers];
 
         int localSeat = gameController != null ? gameController.LocalPlayerSeatIndex : 0;
-        float maxAnswerTime = Mathf.Max(5.5f, timeLimit - 0.5f); // ตอบช้าสุดก่อนหมดเวลา ~0.5 วิ
-        float minAnswerTime = Mathf.Min(5f, maxAnswerTime);      // ตอบเร็วสุด 5 วิ
+        float maxAnswerTime = 2f;
+        float minAnswerTime = 1f;
 
         for (int i = 0; i < totalPlayers; i++)
         {
@@ -1203,6 +1212,24 @@ public class QuizManager : MonoBehaviour
             {
                 answerButton.interactable = false;
             }
+        }
+    }
+
+    public int GetCorrectChoiceIndex()
+    {
+        return currentQuestion != null ? currentQuestion.correctChoiceIndex : -1;
+    }
+
+    public void HighlightCorrectAnswer()
+    {
+        int correctIdx = GetCorrectChoiceIndex();
+        if (answerButtons == null || correctIdx < 0 || correctIdx >= answerButtons.Length) return;
+        
+        // Highlight correct button (just relying on UIMask, don't change text color)
+        Button correctBtn = answerButtons[correctIdx];
+        if (correctBtn != null)
+        {
+            // Do nothing to the text, UIMask handles the highlighting visually
         }
     }
 

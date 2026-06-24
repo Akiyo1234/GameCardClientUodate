@@ -30,6 +30,7 @@ public class ModeSelectUI : MonoBehaviour
     public Button dailyQuizButton;
     public Button shopButton;
     public Button leaderboardButton;
+    public Button tutorialButton;
 
     private void OnEnable()
     {
@@ -75,6 +76,11 @@ public class ModeSelectUI : MonoBehaviour
         {
             logoutButton.onClick.RemoveAllListeners();
             logoutButton.onClick.AddListener(OnClickLogout);
+        }
+        if (tutorialButton != null)
+        {
+            tutorialButton.onClick.RemoveAllListeners();
+            tutorialButton.onClick.AddListener(OnClickTutorialMode);
         }
     }
 
@@ -141,7 +147,25 @@ public class ModeSelectUI : MonoBehaviour
         // สร้าง RankUI เป็น overlay ทับ scene ปัจจุบัน
         // RankUI ตรวจชื่อ "LeaderboardOverlay" → กด Back จะ Destroy ตัวเองแทน LoadScene
         if (UnityEngine.Object.FindFirstObjectByType<RankUI>() != null) return; // ป้องกันเปิดซ้อน
-        var go = new UnityEngine.GameObject("LeaderboardOverlay");
+        
+        // แก้ไขบัค MissingComponent: สร้างพร้อม RectTransform และ Canvas ตั้งแต่แรก
+        var go = new UnityEngine.GameObject(
+            "LeaderboardOverlay",
+            typeof(RectTransform),
+            typeof(Canvas),
+            typeof(UnityEngine.UI.CanvasScaler),
+            typeof(UnityEngine.UI.GraphicRaycaster)
+        );
+        
+        var canvas = go.GetComponent<Canvas>();
+        canvas.renderMode   = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = 50;
+
+        var scaler = go.GetComponent<UnityEngine.UI.CanvasScaler>();
+        scaler.uiScaleMode         = UnityEngine.UI.CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1080, 1920); // แนวตั้ง (Portrait) ตามที่ออกแบบไว้
+        scaler.matchWidthOrHeight  = 0.5f;
+
         go.AddComponent<RankUI>();
     }
 
@@ -169,6 +193,19 @@ public class ModeSelectUI : MonoBehaviour
         PlayerPrefs.DeleteKey("MatchmakingRoomCode");
         PlayerPrefs.Save();
         SceneManager.LoadScene("SampleScene");
+    }
+
+    public void OnClickTutorialMode()
+    {
+        AudioManager.Instance?.PlayButtonClick();
+        GameLog.Log("[Mode] Selected Tutorial mode.");
+        
+        // เซ็ตค่าให้ระบบรู้ว่านี่คือโหมดสอนเล่น
+        PlayerPrefs.SetString("GameMode", "Tutorial");
+        PlayerPrefs.Save();
+        
+        // โหลดเข้า Scene Tutorial
+        SceneManager.LoadScene("TutorialScence");
     }
 
     public void OnClickRoomMode()
