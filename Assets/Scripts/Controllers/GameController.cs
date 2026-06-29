@@ -74,7 +74,7 @@ public partial class GameController : MonoBehaviour
 
     [Header("---- Turn Timer & Rules ----")]
     public float turnDuration = 30f; 
-    private float currentTurnTime;
+    public float currentTurnTime;
     public int winningScore = 20; 
     public int currentRound = 1; 
     public int currentTurnDisplay = 1; 
@@ -98,7 +98,9 @@ public partial class GameController : MonoBehaviour
 
     [Header("---- Bot Settings ----")]
     [SerializeField] private float botTurnDelayMin = 0.5f;
-    [SerializeField] private float botTurnDelayMax = 1.5f;
+    [SerializeField] private float botTurnDelayMax = 1.0f;
+    [SerializeField] private float tutorialBotTurnDelayMin = 0.5f;
+    [SerializeField] private float tutorialBotTurnDelayMax = 1.0f;
     private BotController botController;
     private Coroutine botTurnCoroutine;
     private bool isExecutingBotTurn;
