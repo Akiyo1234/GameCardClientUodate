@@ -133,7 +133,7 @@ public partial class GameController
 
         int localSeatIndex = GetLocalPlayerUiIndex();
         if (localSeatIndex < 0 || localSeatIndex >= players.Length) return false;
-        if (players[localSeatIndex] == null || players[localSeatIndex].isBot) return false;
+        if (players[localSeatIndex] == null || players[localSeatIndex].IsAbsent) return false;
 
         return playOrder[currentPlayerIndex] == localSeatIndex;
     }
@@ -144,7 +144,7 @@ public partial class GameController
         if (isExecutingBotTurn) return false;
 
         // 2. ถ้าเป็นตาของบอท (แต่คนเล่นแอบมากด) -> บล็อก
-        if (IsCurrentPlayerBot())
+        if (IsCurrentSeatAbsent())
         {
             return true;
         }
@@ -175,17 +175,20 @@ public partial class GameController
         if (BlockActionDuringQuiz()) return;
         if (BlockActionUntilContinue()) return;
         // บอทเรียก EndTurn() โดยตรงจาก BotController ซึ่งถูกต้องแล้ว
-        if (IsCurrentPlayerBot() && !isExecutingBotTurn) {
+        if (IsCurrentSeatAbsent() && !isExecutingBotTurn) {
             ShowWarning("กำลังเป็นเทิร์นของบอท");
             return;
         }
-        if (!IsCurrentPlayerBot() && !isExecutingBotTurn && !IsLocalPlayersTurn()) {
+        if (!IsCurrentSeatAbsent() && !isExecutingBotTurn && !IsLocalPlayersTurn()) {
             ShowWarning("กดปุ่มได้เฉพาะในเทิร์นของคุณ");
             return;
         }
         if (isGameOver) return;
 
         if (GetTotalPendingCoins() > 0) {
+            // [Log→DB] เก็บสำเนาเหรียญที่หยิบไว้ก่อน (เดี๋ยว pendingCoins จะถูกล้าง)
+            int[] takenCoins = (int[])pendingCoins.Clone();
+
             // [Game.Core] ตรวจคู่ขนาน (shadow) — flag ปิด = ไม่ทำอะไร, ดู GameController.Authority.cs
             if (useCoreValidation) ShadowValidateTakeCoins();
 
@@ -196,6 +199,18 @@ public partial class GameController
                 players[playOrder[currentPlayerIndex]].ReceiveCoins(pendingCoins); // เปลี่ยนเป็นแจกให้คนเล่นตามคิว
                 ClearPendingCoins();
             }
+
+            // [Log→DB] บันทึกแอคชั่น "หยิบเหรียญ"
+            int coinSeat = playOrder[currentPlayerIndex];
+            GameLogger.Log("take_coins", new GameLogger.Payload()
+                .Add("seat", coinSeat).Add("isBot", players[coinSeat] != null && players[coinSeat].isBot)
+                .Add("coins", takenCoins).Add("round", currentRound));
+
+            // [NetDiag] ดูว่าหยิบแล้วเหรียญเข้าจริงไหม + ใครเป็น master (ไล่กับ APPLY-ECON ฝั่งรับ)
+            GameLog.Log($"[NetDiag] TOOK seat={coinSeat} coins=[{string.Join(",", takenCoins)}] " +
+                $"-> myCoins=[{(players[coinSeat] != null ? string.Join(",", players[coinSeat].coins) : "null")}] " +
+                $"bank=[{string.Join(",", bankCoins)}] online={isOnlineMatchMode} " +
+                $"master={(FusionManager.Instance != null && FusionManager.Instance.IsMasterClient)} drive={useCoreDrive}");
         }
 
         UpdateBankUI();
@@ -203,7 +218,7 @@ public partial class GameController
 
         // [Phase 1] เช็คขุนนางอัตโนมัติก่อนจบเทิร์นของคนปัจจุบัน
         PlayerUI p = players[playOrder[currentPlayerIndex]];
-        nobleManager?.CheckClaim(p);
+        nobleManager?.CheckClaim(p, playOrder[currentPlayerIndex]);
 
         if (isOnlineMatchMode)
         {
@@ -270,6 +285,9 @@ public partial class GameController
         if (!startedQuizThisTurn) {
             ScheduleBotTurnIfNeeded();
         }
+
+        // [Reconnect/ข้อ1] เทิร์น advance เสร็จ + state นิ่งแล้ว → authority เก็บ snapshot กระดานล่าสุดลง DB
+        SaveBoardStateIfAuthority();
     }
 
     // ───────── Win condition check + end-game rewards ─────────
@@ -296,6 +314,7 @@ public partial class GameController
         }
 
         PlayerUI winner = null;
+        int winnerSeat = -1;
         int highestScore = 0;
 
         for (int i = 0; i < activePlayerCount; i++) {
@@ -303,11 +322,41 @@ public partial class GameController
             if (players[i].currentScore >= winningScore && players[i].currentScore > highestScore) {
                 highestScore = players[i].currentScore;
                 winner = players[i];
+                winnerSeat = i;
             }
         }
 
         if (winner != null) {
             isGameOver = true;
+
+            // [Log→DB] บันทึกผลจบเกม (ผู้ชนะ + คะแนนทุก seat + รอบ + roster)
+            //   roster (names/localSeat/bots) เก็บที่นี่แทน game_start เพราะตอนจบเกม ชื่อ/seat sync เสร็จแล้ว
+            //   → online แมป seat→ผู้เล่นได้ถูก (ไม่ติด placeholder/localSeat ผิดเหมือน game_start)
+            int[] finalScores = new int[activePlayerCount];
+            string[] names = new string[activePlayerCount];
+            int[] bots = new int[activePlayerCount];
+            for (int i = 0; i < activePlayerCount; i++)
+            {
+                finalScores[i] = players[i] != null ? players[i].currentScore : 0;
+                names[i] = (players != null && i < players.Length && players[i] != null && players[i].nameText != null)
+                    ? players[i].nameText.text : "";
+                bots[i] = (players != null && i < players.Length && players[i] != null && players[i].isBot) ? 1 : 0;
+            }
+            GameLogger.Log("game_end", new GameLogger.Payload()
+                .Add("winnerSeat", winnerSeat)
+                .Add("scores", finalScores)
+                .Add("rounds", currentRound)
+                .Add("turns", totalTurnCount)
+                .Add("players", activePlayerCount)
+                .Add("localSeat", GetLocalPlayerUiIndex())
+                .Add("names", string.Join("|", names))
+                .Add("bots", bots));
+
+            // [Log→DB] จบเกมแล้ว — ส่ง log ที่ค้างใน buffer ทั้งหมดทันที (กันตกหล่น)
+            GameLogger.FlushNow();
+
+            // [Reconnect/ข้อ1] บันทึก board สุดท้าย + ปิด match_sessions เป็น finished
+            FinishMatchSessionIfAuthority();
 
             // อัปเดตสถานะห้องใน Supabase เป็น 'finished' (host เท่านั้น — เมธอด check เอง)
             FusionManager.Instance?.SetRoomStatus("finished");
@@ -317,7 +366,7 @@ public partial class GameController
             if (localSeatIndex >= 0 &&
                 localSeatIndex < players.Length &&
                 players[localSeatIndex] != null &&
-                !players[localSeatIndex].isBot)
+                !players[localSeatIndex].IsAbsent)
             {
                 int earnedCoins  = GetTotalPlayerCoins(localSeatIndex);
                 int earnedPoints = players[localSeatIndex].currentScore;
@@ -448,7 +497,7 @@ public partial class GameController
         if (playOrder != null && playOrder.Length > currentPlayerIndex)
         {
             PlayerUI p = players[playOrder[currentPlayerIndex]];
-            nobleManager?.CheckClaim(p);
+            nobleManager?.CheckClaim(p, playOrder[currentPlayerIndex]);
         }
 
         // [REVERT] ตรวจสอบการชนะเกม "ทันที" ในทุกๆ เทิร์น!

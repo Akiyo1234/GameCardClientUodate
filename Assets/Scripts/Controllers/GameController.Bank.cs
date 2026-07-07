@@ -65,16 +65,16 @@ public partial class GameController
         if (BlockActionUntilContinue()) { GameLog.Log("[OnResourceClicked] Blocked by BlockActionUntilContinue"); return; }
         if (BlockActionOutsideLocalTurn()) { GameLog.Log("[OnResourceClicked] Blocked by BlockActionOutsideLocalTurn"); return; }
         if (isGameOver) { GameLog.Log("[OnResourceClicked] Blocked by isGameOver"); return; }
-        if (IsCurrentPlayerBot() && !isExecutingBotTurn) {
+        if (IsCurrentSeatAbsent() && !isExecutingBotTurn) {
             ShowWarning("กำลังเป็นเทิร์นของบอท");
-            GameLog.Log("[OnResourceClicked] Blocked by IsCurrentPlayerBot");
+            GameLog.Log("[OnResourceClicked] Blocked by IsCurrentSeatAbsent");
             return;
         }
 
         int index = GetResourceIndex(clickedBtn.resourceType);
 
         if (index == 5) {
-            ShowWarning("หยิบเหรียญทองโดยตรงไม่ได้! ต้องใช้แอคชั่น 'จองการ์ด' เท่านั้น");
+            ShowWarning("หยิบเหรียญพิเศษ/เหรียญดำโดยตรงไม่ได้! ต้องใช้แอคชั่น 'จองการ์ด' เท่านั้น");
             return;
         }
 

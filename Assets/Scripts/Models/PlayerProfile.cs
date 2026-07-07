@@ -32,6 +32,9 @@ public class PlayerProfile : BaseModel
     [Column("selected_character")]
     public int SelectedCharacter { get; set; } = 0;
 
+    [Column("tutorial_completed")]
+    public bool TutorialCompleted { get; set; } = false;
+
     [Column("updated_at")]
     public System.DateTime UpdatedAt { get; set; }
 }

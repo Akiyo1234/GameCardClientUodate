@@ -38,7 +38,13 @@ public partial class GameController
         GameLog.Log($"[GameController] Host ได้รับคำขอ full state จาก player {requesterPlayerId} → ส่งกลับเฉพาะคนนั้น");
         FusionManager.Instance.SendBoardStateToPlayer(requesterPlayerId, BuildBoardSnapshot());
         FusionManager.Instance.SendEconomyStateToPlayer(requesterPlayerId, BuildEconomySnapshot());
-        FusionManager.Instance.SendTurnStateToPlayer(requesterPlayerId, currentPlayerIndex, currentRound, totalTurnCount, currentTurnDisplay);
+        // [Reconnect fix] แนบเวลาเทิร์นที่เหลือจริงของ host ไปด้วย — คน rejoin กลางเทิร์นจะได้ไม่เริ่มนับใหม่เต็มเวลา
+        // [Reconnect ข้อ1] แนบ playOrder (คิวเทิร์นจริงหลังควิซสลับ) — คน rejoin สร้าง GameController ใหม่ (playOrder=[0,1,..])
+        //   ถ้าไม่ส่งคิวไปด้วย currentPlayerIndex จะชี้คนละ seat → เทิร์นเพี้ยน (เห็นเป็นของคนอื่น) — ดู HandleOnlineTurnStateReceived
+        FusionManager.Instance.SendTurnStateToPlayer(requesterPlayerId, currentPlayerIndex, currentRound, totalTurnCount, currentTurnDisplay,
+            Mathf.CeilToInt(currentTurnTime), playOrder);
+        // [TurnSync diag] ยืนยันว่า authority (build นี้) แนบคิวไปด้วย — ถ้าฝั่ง reconnect log "order=null" แปลว่า authority ยังเป็น build เก่า
+        GameLog.Log($"[TurnSync] full-state→player {requesterPlayerId}: idx={currentPlayerIndex} order=[{(playOrder != null ? string.Join(",", playOrder) : "null")}]");
     }
 
     private bool IsMatchedOnlineSession()
@@ -104,7 +110,7 @@ public partial class GameController
             // ——————————————————————————————————————————
             if (FusionManager.Instance != null)
             {
-                UpdateDisconnectedPlayerBotStatus();
+                UpdateDisconnectedPlayerStatus();
             }
 
             ApplyNetworkPlayerNamesToUi();
@@ -129,8 +135,8 @@ public partial class GameController
         }
     }
 
-    // [FIX] เช็ค seat index ที่ Fusion ไม่มีตัวตนอยู่แล้ว และตั้ง isBot = true/false ตามสถานะการเชื่อมต่อ
-    private void UpdateDisconnectedPlayerBotStatus()
+    // [FIX] เช็ค seat ว่าคนจริงยังเชื่อมต่ออยู่ไหม แล้วตั้ง isDisconnected = true/false (online เท่านั้น — ไม่แตะ isBot ของบอท offline)
+    private void UpdateDisconnectedPlayerStatus()
     {
         if (FusionManager.Instance == null || players == null) return;
         if (FusionManager.Instance.Runner == null) return;
@@ -144,37 +150,59 @@ public partial class GameController
 
             int seatPlayerId = FusionManager.Instance.GetPlayerIdBySeat(seat);
             bool isConnected = seatPlayerId >= 0 && FusionManager.Instance.IsPlayerConnected(seatPlayerId);
-            bool wasBot = players[seat].isBot;
+            bool wasDisconnected = players[seat].isDisconnected;
 
-            if (!isConnected && !wasBot)
+            if (!isConnected && !wasDisconnected)
             {
-                // ออกไป — เปลี่ยนเป็น Bot ชั่วคราว (เทิร์นจะถูกข้ามด้วย timer ForceEndTurn)
-                players[seat].isBot = true;
-                GameLog.Log($"[GameController] Seat {seat} หลุดเชื่อมต่อ → เปลี่ยนเป็น Bot ชั่วคราว");
+                // ออกไป — mark isDisconnected ไว้เพื่อ "บล็อก input + ใช้ตรวจ reconnect" เท่านั้น
+                // ไม่มีบอทเล่นแทนแล้ว → เทิร์นของ seat นี้ถูกข้ามด้วย Turn Timer (ForceEndTurn)
+                players[seat].isDisconnected = true;
+                GameLog.Log($"[GameController] Seat {seat} หลุดเชื่อมต่อ → ข้ามเทิร์นอัตโนมัติ (timer) จนกว่าจะกลับเข้ามา");
             }
-            else if (isConnected && wasBot)
+            else if (isConnected && wasDisconnected)
             {
                 // ต่อกลับมา — คืนตัวเป็นผู้เล่นจริง + ดึง full state ล่าสุด
-                players[seat].isBot = false;
+                players[seat].isDisconnected = false;
                 GameLog.Log($"[GameController] Seat {seat} ต่อกลับมา → คืนตัวเป็นผู้เล่นจริง");
                 FusionManager.Instance.RequestFullState();
             }
         }
     }
 
-    private void HandleOnlineTurnStateReceived(int syncedCurrentPlayerIndex, int syncedRound, int syncedTotalTurnCount, int syncedTurnDisplay)
+    private void HandleOnlineTurnStateReceived(int syncedCurrentPlayerIndex, int syncedRound, int syncedTotalTurnCount, int syncedTurnDisplay, int syncedRemainingSeconds, int[] syncedPlayOrder)
     {
         if (!isOnlineMatchMode)
         {
             return;
         }
 
-        currentPlayerIndex = Mathf.Clamp(syncedCurrentPlayerIndex, 0, Mathf.Max(0, activePlayerCount - 1));
+        // [Reconnect ข้อ1] adopt "คิวเทิร์นจริง" จาก authority ก่อน map currentPlayerIndex
+        //   ควิซสลับ playOrder; คน reconnect เกิด GameController ใหม่ (SetupPlayers รีเซ็ต playOrder=[0,1,..])
+        //   ถ้าไม่ทับคิว → playOrder[currentPlayerIndex] ชี้คนละ seat กับ host → "เทิร์นกลายเป็นของคนอื่น แต่คนอื่นเห็นเทิร์นเดิม"
+        //   (payload เก่า/คิวเสีย → syncedPlayOrder=null → คงคิวเดิม = พฤติกรรมก่อนหน้า)
+        bool adoptedOrder = IsValidSyncedPlayOrder(syncedPlayOrder);
+        if (adoptedOrder)
+        {
+            playOrder = syncedPlayOrder;
+        }
+
+        int orderLength = (playOrder != null && playOrder.Length > 0) ? playOrder.Length : Mathf.Max(1, activePlayerCount);
+        currentPlayerIndex = Mathf.Clamp(syncedCurrentPlayerIndex, 0, orderLength - 1);
+
+        // [TurnSync diag] ใช้ยืนยันว่า build นี้มี fix + playOrder ซิงก์จริง (ทั้ง 2 เครื่องต้องเห็น seat เดียวกันเป็นเทิร์น)
+        //   ถ้า order=null แปลว่า "ผู้ส่ง (authority) เป็น build เก่า" ที่ยังไม่แนบ playOrder → ต้อง rebuild ฝั่งนั้นด้วย
+        GameLog.Log($"[TurnSync] recv idx={syncedCurrentPlayerIndex} order=[{(syncedPlayOrder != null ? string.Join(",", syncedPlayOrder) : "null")}] adopted={adoptedOrder} " +
+            $"→ playOrder=[{string.Join(",", playOrder)}] localSeat={GetLocalPlayerUiIndex()} curSeat={(currentPlayerIndex < playOrder.Length ? playOrder[currentPlayerIndex] : -1)} isLocalTurn={IsLocalPlayersTurn()}");
         currentRound = Mathf.Max(1, syncedRound);
         totalTurnCount = Mathf.Max(0, syncedTotalTurnCount);
         currentTurnDisplay = Mathf.Max(1, syncedTurnDisplay);
 
-        ResetTimer();
+        // [Reconnect fix] ถ้าผู้ส่งแนบเวลาที่เหลือมา → ใช้ค่านั้น (rejoin กลางเทิร์นเวลาตรงกับคนอื่น ไม่นับใหม่)
+        //   payload เก่า/ไม่ทราบ (-1) → fallback รีเซ็ตเต็มตามเดิม; เปลี่ยนเทิร์นปกติผู้ส่งแนบเวลาเต็มมาอยู่แล้ว = พฤติกรรมเดิม
+        if (syncedRemainingSeconds > 0)
+            currentTurnTime = Mathf.Min(syncedRemainingSeconds, turnDuration);
+        else
+            ResetTimer();
         UpdateTurnVisuals();
         UpdateTurnCountUI();
         System.Array.Clear(pendingCoins, 0, pendingCoins.Length);
@@ -188,12 +216,24 @@ public partial class GameController
         ClearWarning();
     }
 
+    // [Desync fix] version ล่าสุดที่ apply ไปแล้ว — กัน snapshot เก่า (turn ก่อน) มาทับของใหม่
+    private int _lastAppliedEconVersion = -1;
+    private int _lastAppliedBoardVersion = -1;
+
     private void HandleOnlineEconomyStateReceived(FusionManager.EconomyStateSnapshot snapshot)
     {
         if (!isOnlineMatchMode)
         {
             return;
         }
+
+        // ข้าม snapshot ที่ version เก่ากว่าที่ apply ไปแล้ว (= ต้นเหตุ "หยิบเหรียญแล้วโดน revert")
+        if (snapshot.Version < _lastAppliedEconVersion)
+        {
+            GameLog.Log($"[NetDiag] APPLY-ECON SKIP stale ver={snapshot.Version} < applied={_lastAppliedEconVersion}");
+            return;
+        }
+        _lastAppliedEconVersion = snapshot.Version;
 
         ApplyEconomySnapshot(snapshot);
         EvaluateWinCondition();
@@ -208,25 +248,36 @@ public partial class GameController
             return;
         }
 
+        // local seat = ตัวเราเอง (คำนวณจาก _seatOrder ล่าสุด — หลัง reconnect ถูกแก้โดย SEATMAP แล้ว)
+        int localSeat = GetLocalPlayerUiIndex();
+        string localName = GetConfiguredLocalPlayerName();
+
         for (int seatIndex = 0; seatIndex < activePlayerCount && seatIndex < players.Length; seatIndex++)
         {
-            if (players[seatIndex] == null || players[seatIndex].isBot)
+            if (players[seatIndex] == null || players[seatIndex].nameText == null)
             {
+                continue;
+            }
+
+            // seat ของเราเอง → ยืนยันชื่อเราเสมอ
+            //   กันเคส reconnect: ตอน SetupPlayers ระบุ local seat ผิด (seatOrder ยังไม่พร้อม) แล้ว bake ชื่อเราลง seat อื่น
+            if (seatIndex == localSeat)
+            {
+                players[seatIndex].nameText.text = localName;
                 continue;
             }
 
             string playerName = FusionManager.Instance.GetPlayerNameBySeat(seatIndex);
-            if (string.IsNullOrWhiteSpace(playerName))
-            {
-                continue;
-            }
-
-            if (players[seatIndex].nameText != null)
+            if (!string.IsNullOrWhiteSpace(playerName))
             {
                 players[seatIndex].nameText.text = playerName;
+                GameLog.Log($"[GameController] Updated player slot {seatIndex + 1} name to {playerName}");
             }
-
-            GameLog.Log($"[GameController] Updated player slot {seatIndex + 1} name to {playerName}");
+            else if (players[seatIndex].nameText.text == localName)
+            {
+                // ยังไม่รู้ชื่อจริงของ seat นี้ แต่ดันโชว์ "ชื่อเรา" (bake ผิดตอน reconnect) → เคลียร์เป็น placeholder
+                players[seatIndex].nameText.text = "Online Player " + (seatIndex + 1);
+            }
         }
     }
 
@@ -326,7 +377,24 @@ public partial class GameController
             return;
         }
 
-        FusionManager.Instance.SendTurnState(currentPlayerIndex, currentRound, totalTurnCount, currentTurnDisplay);
+        // แนบเวลาที่เหลือด้วย — ตอนเปลี่ยนเทิร์นปกติ ResetTimer() ถูกเรียกก่อน publish เสมอ จึงเท่ากับเวลาเต็มพอดี
+        // [Reconnect ข้อ1] แนบ playOrder ทุกครั้ง → คิวเทิร์นซิงก์ต่อเนื่อง (แม้พลาด quiz-reorder รอบก่อน เทิร์นถัดไปก็แก้ให้ตรง)
+        FusionManager.Instance.SendTurnState(currentPlayerIndex, currentRound, totalTurnCount, currentTurnDisplay,
+            Mathf.CeilToInt(currentTurnTime), playOrder);
+    }
+
+    // playOrder ที่รับมาจาก network ต้องอ้าง seat ในช่วงที่ถูกต้องทุกตัว ถึงจะเอามาทับของเดิม
+    //   (กัน index หลุดช่วงตอน playOrder[currentPlayerIndex] ใน EndTurn/UpdateTurnVisuals/หยิบเหรียญ)
+    private bool IsValidSyncedPlayOrder(int[] order)
+    {
+        if (order == null || order.Length == 0) return false;
+        int seatCount = players != null ? players.Length : 0;
+        if (seatCount == 0) return false;
+        foreach (int seat in order)
+        {
+            if (seat < 0 || seat >= seatCount) return false;
+        }
+        return true;
     }
 
     // ───────── Economy state sync (bank + each player's coins/bonuses/score) ─────────
@@ -347,7 +415,10 @@ public partial class GameController
             return;
         }
 
-        FusionManager.Instance.SendEconomyState(BuildEconomySnapshot());
+        var econSnap = BuildEconomySnapshot();
+        GameLog.Log($"[NetDiag] PUBLISH-ECON by master={FusionManager.Instance.IsMasterClient} " +
+            $"bank=[{(econSnap.BankCoins != null ? string.Join(",", econSnap.BankCoins) : "null")}]");
+        FusionManager.Instance.SendEconomyState(econSnap);
     }
 
     private FusionManager.EconomyStateSnapshot BuildEconomySnapshot()
@@ -355,7 +426,8 @@ public partial class GameController
         var snapshot = new FusionManager.EconomyStateSnapshot
         {
             BankCoins = (int[])bankCoins.Clone(),
-            Players = new FusionManager.EconomyPlayerSnapshot[activePlayerCount]
+            Players = new FusionManager.EconomyPlayerSnapshot[activePlayerCount],
+            Version = totalTurnCount   // logical clock (sync อยู่แล้ว) — กัน snapshot เก่าทับ
         };
 
         for (int i = 0; i < activePlayerCount; i++)
@@ -376,6 +448,20 @@ public partial class GameController
 
     private void ApplyEconomySnapshot(FusionManager.EconomyStateSnapshot snapshot)
     {
+        // [NetDiag] log "ก่อนเขียนทับ" — ถ้า in=[..] ต่างจาก cur=[..] แสดงว่า snapshot นี้กำลัง revert เหรียญที่เพิ่งหยิบ
+        if (snapshot.Players != null)
+        {
+            var diag = new System.Text.StringBuilder("[NetDiag] APPLY-ECON master=");
+            diag.Append(FusionManager.Instance != null && FusionManager.Instance.IsMasterClient);
+            diag.Append(" bankIn=[").Append(snapshot.BankCoins != null ? string.Join(",", snapshot.BankCoins) : "null").Append("]");
+            for (int i = 0; i < activePlayerCount && i < snapshot.Players.Length && i < players.Length; i++)
+            {
+                if (players[i] == null) continue;
+                diag.Append($" | p{i} cur=[{string.Join(",", players[i].coins)}] in=[{(snapshot.Players[i].Coins != null ? string.Join(",", snapshot.Players[i].Coins) : "null")}]");
+            }
+            GameLog.Log(diag.ToString());
+        }
+
         if (snapshot.BankCoins != null)
         {
             for (int i = 0; i < bankCoins.Length && i < snapshot.BankCoins.Length; i++)
@@ -457,7 +543,10 @@ public partial class GameController
             Tier1CardIds = GetBoardTierCardIds(tier1Container),
             Tier2CardIds = GetBoardTierCardIds(tier2Container),
             Tier3CardIds = GetBoardTierCardIds(tier3Container),
-            UsedCardIds = new List<string>(usedCardIds).ToArray()
+            UsedCardIds = new List<string>(usedCardIds).ToArray(),
+            Version = totalTurnCount,   // logical clock — กัน snapshot เก่าทับ
+            // [Noble sync] ชุดขุนนาง + ใคร claim ใบไหน — ให้ทุกเครื่องเห็นชุดเดียวกันและเห็นการ claim
+            NobleEntries = nobleManager != null ? nobleManager.BuildSyncEntries() : null
         };
     }
 
@@ -485,6 +574,14 @@ public partial class GameController
             return;
         }
 
+        // ข้าม snapshot กระดานที่เก่ากว่าที่ apply แล้ว (กันการ์ดที่เพิ่งเปลี่ยนโดน revert)
+        if (snapshot.Version < _lastAppliedBoardVersion)
+        {
+            GameLog.Log($"[NetDiag] APPLY-BOARD SKIP stale ver={snapshot.Version} < applied={_lastAppliedBoardVersion}");
+            return;
+        }
+        _lastAppliedBoardVersion = snapshot.Version;
+
         ApplyBoardSnapshot(snapshot);
     }
 
@@ -511,6 +608,13 @@ public partial class GameController
         RebuildTierIfChanged(tier3Container, snapshot.Tier3CardIds);
         RebuildTierIfChanged(tier2Container, snapshot.Tier2CardIds);
         RebuildTierIfChanged(tier1Container, snapshot.Tier1CardIds);
+
+        // [Noble sync] ชุดขุนนาง + สถานะ claim ตามผู้ส่ง (null = ผู้ส่ง build เก่า/ยัง setup ไม่เสร็จ → ข้าม)
+        //   nobleManager อาจยัง null ถ้า snapshot มาก่อน StartInitialGameplay — ข้ามได้ เดี๋ยว publish รอบถัดไปตามมา
+        if (snapshot.NobleEntries != null && nobleManager != null)
+        {
+            nobleManager.SyncFromEntries(snapshot.NobleEntries);
+        }
     }
 
     private void RebuildTierIfChanged(Transform container, string[] cardIds)

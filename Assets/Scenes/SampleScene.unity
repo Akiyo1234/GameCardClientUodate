@@ -3798,6 +3798,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 3700a56b20f35384ba1b1734dfdd9813, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::GameController
+  useCoreValidation: 0
+  useCoreDrive: 0
+  autoPlayTestMode: 0
   tier3Container: {fileID: 172025451}
   tier2Container: {fileID: 801814125}
   tier1Container: {fileID: 1759733993}

@@ -2,21 +2,6 @@ using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
 
-public enum TutorialStep
-{
-    QuizAnswer = 1,
-    TakeThreeTokens = 2,
-    CancelToken = 3,
-    TakeTwoTokens = 4,
-    EndTurn = 5,
-    BuyCard = 6,
-    ReserveCard = 7,
-    TakeTokensAgain = 8,
-    BuyReservedCard = 9,
-    WinCondition = 10,
-    Finished = 11
-}
-
 public class TutorialManager : MonoBehaviour
 {
     public TutorialUIMask uiMask;

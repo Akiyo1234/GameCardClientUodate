@@ -21,6 +21,10 @@ public class NobleManager
     private readonly List<NobleData> masterPool;
     private readonly List<NobleDisplay> active = new List<NobleDisplay>();
 
+    // [Noble sync] ใบที่ spawn ทั้งหมด (รวมที่ถูก claim แล้ว — active เก็บเฉพาะที่ยังว่าง) + ใคร claim ใบไหน
+    private readonly List<NobleDisplay> spawned = new List<NobleDisplay>();
+    private readonly Dictionary<string, string> claimedBy = new Dictionary<string, string>();
+
     public IReadOnlyList<NobleDisplay> Active => active;
 
     public NobleManager(
@@ -45,6 +49,8 @@ public class NobleManager
         }
 
         active.Clear();
+        spawned.Clear();
+        claimedBy.Clear();
 
         // ก็อปปี้ลิสต์ออกมาสับไพ่ (Fisher-Yates shuffle)
         List<NobleData> tempNobles = new List<NobleData>(masterPool);
@@ -59,30 +65,36 @@ public class NobleManager
         // ดึงมา 4 ใบ — 2 ใบแรกซ้าย, 2 ใบหลังขวา
         for (int i = 0; i < 4; i++)
         {
-            NobleData selectedNoble = tempNobles[i];
-            Transform targetContainer = (i < 2) ? leftContainer : rightContainer;
-
-            if (targetContainer == null)
-            {
-                Debug.LogWarning("[NobleManager] ยังไม่ได้ผูก Left/Right Noble Container!");
-                continue;
-            }
-
-            GameObject nobleObj = Object.Instantiate(noblePrefab, targetContainer);
-            NobleDisplay display = nobleObj.GetComponent<NobleDisplay>();
-
-            if (display != null)
-            {
-                display.SetupNoble(selectedNoble);
-                active.Add(display);
-            }
+            SpawnNoble(tempNobles[i], i);
         }
 
         GameLog.Log("[NobleManager] สร้างและสุ่มขุนนาง 4 ใบเรียบร้อย");
     }
 
+    // spawn ขุนนาง 1 ใบตามตำแหน่ง (index < 2 = ซ้าย, ที่เหลือขวา) — ใช้ทั้ง Setup และ SyncFromEntries
+    private NobleDisplay SpawnNoble(NobleData selectedNoble, int index)
+    {
+        Transform targetContainer = (index < 2) ? leftContainer : rightContainer;
+        if (targetContainer == null)
+        {
+            Debug.LogWarning("[NobleManager] ยังไม่ได้ผูก Left/Right Noble Container!");
+            return null;
+        }
+
+        GameObject nobleObj = Object.Instantiate(noblePrefab, targetContainer);
+        NobleDisplay display = nobleObj.GetComponent<NobleDisplay>();
+        if (display != null)
+        {
+            display.SetupNoble(selectedNoble);
+            active.Add(display);
+            spawned.Add(display);
+        }
+        return display;
+    }
+
     /// <summary>เช็คว่า player มีโบนัสครบเงื่อนไขขุนนางใบไหน → ให้คะแนน + เอาออกจาก active</summary>
-    public void CheckClaim(PlayerUI player)
+    /// <param name="seat">index ที่นั่งของผู้เล่น (สำหรับ log→DB); -1 = ไม่ทราบ</param>
+    public void CheckClaim(PlayerUI player, int seat = -1)
     {
         if (player == null) return;
 
@@ -107,9 +119,17 @@ public class NobleManager
                 string claimerName = player.nameText != null ? player.nameText.text : "ผู้เล่น";
                 GameLog.Log($"[Noble] {claimerName} ได้รับขุนนาง: {data.nobleName} (+{data.victoryPoints} VP)");
 
+                // [Log→DB] บันทึกการได้ขุนนาง — VP จากขุนนางหายจาก log มาตลอด ทำให้ reconstruct คะแนนไม่ตรง game_end.scores
+                GameLogger.Log("claim_noble", new GameLogger.Payload()
+                    .Add("seat", seat)
+                    .Add("nobleId", data.nobleName)
+                    .Add("vp", data.victoryPoints)
+                    .Add("isBot", player.isBot));
+
                 player.AddScore(data.victoryPoints);
                 nobleDisplay.ClaimNoble(claimerName);
                 active.RemoveAt(i);
+                claimedBy[data.nobleName] = claimerName; // [Noble sync] จำไว้ส่งให้เครื่องอื่นเห็นว่าใครได้ใบนี้
             }
         }
     }
@@ -130,9 +150,84 @@ public class NobleManager
             {
                 d.ClaimNoble(claimerName);
                 active.RemoveAt(i);
+                claimedBy[nobleName] = claimerName; // [Noble sync] จำไว้ส่งต่อ
                 return true;
             }
         }
         return false;
+    }
+
+    // ============================================================
+    // [Noble sync — online] ขุนนางต้องเหมือนกันทุกเครื่อง (เดิมแต่ละเครื่องสุ่มเอง + claim ไม่ส่งข้ามเครื่อง)
+    //   BuildSyncEntries: ฝั่งส่ง (ไปกับ BoardStateSnapshot) — entry ละใบ "ชื่อ~คนclaim" (ว่าง = ยังไม่ถูก claim)
+    //   SyncFromEntries:  ฝั่งรับ — ชุดชื่อไม่ตรง → เคลียร์แล้ว spawn ใหม่ตามผู้ส่ง; ใบที่ถูก claim → ซ่อน visual
+    //                     (ไม่บวกคะแนน — คะแนนมากับ economy snapshot อยู่แล้ว) — idempotent เรียกซ้ำได้
+    // ============================================================
+
+    public string[] BuildSyncEntries()
+    {
+        var entries = new string[spawned.Count];
+        for (int i = 0; i < spawned.Count; i++)
+        {
+            NobleDisplay d = spawned[i];
+            string name = (d != null && d.nobleData != null) ? d.nobleData.nobleName : "";
+            claimedBy.TryGetValue(name, out string claimer);
+            entries[i] = $"{name}~{claimer ?? ""}";
+        }
+        return entries;
+    }
+
+    public void SyncFromEntries(string[] entries)
+    {
+        if (entries == null || entries.Length == 0) return; // ผู้ส่งเป็น build เก่า/ยังไม่ setup → อย่าแตะของเดิม
+
+        // แตก entry เป็น (ชื่อ, คนclaim)
+        var names = new List<string>();
+        var claimers = new List<string>();
+        foreach (string e in entries)
+        {
+            if (string.IsNullOrEmpty(e)) continue;
+            int sep = e.IndexOf('~');
+            names.Add(sep >= 0 ? e.Substring(0, sep) : e);
+            claimers.Add(sep >= 0 ? e.Substring(sep + 1) : "");
+        }
+        if (names.Count == 0) return;
+
+        // ชุดขุนนางในเครื่องตรงกับผู้ส่งไหม (ชื่อ+ลำดับ) — ไม่ตรง (เช่นเครื่องนี้สุ่มเองตอนเริ่ม) → สร้างใหม่ตามผู้ส่ง
+        bool sameSet = spawned.Count == names.Count;
+        for (int i = 0; sameSet && i < spawned.Count; i++)
+        {
+            string localName = (spawned[i] != null && spawned[i].nobleData != null) ? spawned[i].nobleData.nobleName : "";
+            if (localName != names[i]) sameSet = false;
+        }
+
+        if (!sameSet)
+        {
+            GameLog.Log("[NobleManager] ชุดขุนนางไม่ตรงกับผู้ส่ง → สร้างใหม่ตาม snapshot");
+            foreach (var d in spawned) if (d != null) Object.Destroy(d.gameObject);
+            active.Clear();
+            spawned.Clear();
+            claimedBy.Clear();
+
+            for (int i = 0; i < names.Count; i++)
+            {
+                NobleData data = masterPool != null ? masterPool.Find(n => n != null && n.nobleName == names[i]) : null;
+                if (data == null)
+                {
+                    Debug.LogWarning($"[NobleManager] ไม่พบขุนนาง '{names[i]}' ใน master pool — ข้ามใบนี้");
+                    continue;
+                }
+                SpawnNoble(data, i);
+            }
+        }
+
+        // apply สถานะ claim (ClaimByName idempotent — ใบที่ซ่อนไปแล้วเรียกซ้ำ = no-op)
+        for (int i = 0; i < names.Count; i++)
+        {
+            if (!string.IsNullOrEmpty(claimers[i]))
+            {
+                ClaimByName(names[i], claimers[i]);
+            }
+        }
     }
 }

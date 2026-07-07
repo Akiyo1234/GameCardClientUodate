@@ -87,6 +87,9 @@ public class QuizManager : MonoBehaviour
     private int lastSecondTicked = -1;
     private bool _quizStartRequestedBeforeLoad; // มีการสั่งเริ่มควิซตอน DB ยังโหลดไม่เสร็จ
 
+    // ใช้โดย Tutorial: หยุดนับถอยหลังไว้ระหว่างที่ยังอธิบายขั้นตอนไม่จบ กันหมดเวลาก่อนผู้เล่นจะได้กดตอบ
+    [HideInInspector] public bool timerFrozen = false;
+
     [Header("---- ตั้งค่าบอท (โหมด offline) ----")]
     [Tooltip("โอกาสที่บอทแต่ละตัวจะตอบถูก (0-1) เช่น 0.5 = 50%")]
     [Range(0f, 1f)] public float botCorrectChance = 0.5f;
@@ -198,9 +201,17 @@ public class QuizManager : MonoBehaviour
             }
 
             // รอจนกว่า SupabaseManager จะ Initialize เสร็จ (ถ้าโหลดพร้อมกัน)
-            while (!SupabaseManager.Instance.IsInitialized)
+            // [FIX] ใส่ timeout ~5 วิ กันค้างตลอดกาลถ้า init ไม่สำเร็จ (ออฟไลน์/เน็ตล่ม) → ปล่อยให้ fallback cache/JSON ทำงาน
+            int waitedMs = 0;
+            while (!SupabaseManager.Instance.IsInitialized && waitedMs < 5000)
             {
                 await Task.Delay(100);
+                waitedMs += 100;
+            }
+            if (!SupabaseManager.Instance.IsInitialized)
+            {
+                Debug.LogWarning("[Quiz] Supabase init timeout (~5s) — fallback to cache/local JSON");
+                return false;
             }
 
             var response = await SupabaseManager.Instance.Client.Rpc("get_active_questions", null);
@@ -352,7 +363,20 @@ public class QuizManager : MonoBehaviour
             return;
         }
 
+        if (timerFrozen)
+        {
+            return;
+        }
+
         currentTime -= Time.deltaTime;
+
+        // โหมดฝึกสอน (Tutorial) เท่านั้น: ห้ามเวลาลดต่ำกว่า 1 วิ ถ้ายังมีคนไม่กดตอบ (รอให้ตอบก่อนค่อยหมดเวลาจริง)
+        if (currentTime < 1f && !HaveAllPlayersAnswered()
+            && UnityEngine.Object.FindAnyObjectByType<TutorialManager>() != null)
+        {
+            currentTime = 1f;
+        }
+
         if (timerText != null) timerText.text = Mathf.Max(0, Mathf.CeilToInt(currentTime)).ToString();
         if (timeBarFill != null) timeBarFill.fillAmount = Mathf.Clamp01(currentTime / timeLimit);
 
@@ -654,6 +678,23 @@ public class QuizManager : MonoBehaviour
             GameLog.Log("<color=red>หมดเวลา! ไม่มีใครตอบเลย</color>");
         }
 
+        // [Log→DB] บันทึกคำตอบควิซของผู้เล่นที่ "ตอบจริง" รอบนี้
+        //   จุดนี้รันเฉพาะ offline-local หรือ online-HOST (client ถูก return ออกไปด้านบนแล้ว)
+        //   → ไม่ log ซ้ำข้ามเครื่อง; คำตอบของ remote/บอท ถูกรวมใน currentAnswers แล้ว
+        if (currentAnswers != null)
+        {
+            string qid = currentQuestion != null ? currentQuestion.id : null;
+            foreach (PlayerAnswer ans in currentAnswers)
+            {
+                if (ans == null) continue;
+                GameLogger.Log("quiz_answer", new GameLogger.Payload()
+                    .Add("seat", ans.playerIndex)
+                    .Add("questionId", qid)
+                    .Add("correct", ans.isCorrect)
+                    .Add("timeMs", Mathf.RoundToInt(ans.timeTaken * 1000f)));
+            }
+        }
+
         List<int> rewardGemIndices = DetermineRewardGemIndices(currentAnswers);
         ProcessQuizResults(currentAnswers, rewardGemIndices);
         gameController?.PublishOnlineEconomyState();
@@ -808,7 +849,13 @@ public class QuizManager : MonoBehaviour
 
             // ส่งค่า iAmCorrect ไปที่ playFireworks เพื่อให้หน้าจอเปลี่ยนสี เขียว/แดง
             resultScreen.ShowResults(title, turnOrderNames, false, feedbackMsg, iAmCorrect);
-            
+
+            // [Tutorial Mode] ห้าม auto-close กดปุ่ม Let's Go แทนผู้เล่น เพราะ coach-mark กำลังสอนให้กดปุ่มนี้เอง
+            if (UnityEngine.Object.FindAnyObjectByType<TutorialManager>() != null)
+            {
+                resultScreen.DisableAutoClose();
+            }
+
             if (audioSource != null)
             {
                 audioSource.Stop(); // [BUGFIX] หยุดเสียงนับถอยหลังก่อนประกาศผล
@@ -1123,7 +1170,7 @@ public class QuizManager : MonoBehaviour
             {
                 winnerUI.AddQuizBlackCoin();
 
-                const string blackCoinName = "เหรียญดำ";
+                const string blackCoinName = "เหรียญพิเศษ/เหรียญดำ";
                 if (receivedGems.ContainsKey(blackCoinName))
                 {
                     receivedGems[blackCoinName]++;
@@ -1331,7 +1378,7 @@ public class QuizManager : MonoBehaviour
             case 2: return "Network";
             case 3: return "Storage";
             case 4: return "Security";
-            case 5: return "เหรียญดำ";
+            case 5: return "เหรียญพิเศษ/เหรียญดำ";
             default: return "Item";
         }
     }

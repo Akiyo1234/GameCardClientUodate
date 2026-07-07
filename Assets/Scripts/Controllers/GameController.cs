@@ -73,7 +73,7 @@ public partial class GameController : MonoBehaviour
     public int[] bankCoins = new int[6] { 7, 7, 7, 7, 7, 5 }; 
 
     [Header("---- Turn Timer & Rules ----")]
-    public float turnDuration = 30f; 
+    public float turnDuration = 30f;
     public float currentTurnTime;
     public int winningScore = 20; 
     public int currentRound = 1; 
@@ -238,6 +238,14 @@ public partial class GameController : MonoBehaviour
     {
         GameLog.Log("[GameController] Leaving match and returning to main menu...");
 
+        // 0. [Reconnect] ถ้าเราเป็นคนสุดท้ายในห้อง → ปิด session + ห้องทันที (ยิง REST ก่อนตัดเน็ต/เปลี่ยนฉาก)
+        //    ถ้ายังมีคนอื่นเหลือ → ไม่ปิด เขาเล่นต่อได้ ; เคส crash ยังมี cron เป็น safety net
+        AbandonMatchSessionIfLastLeaver();
+        if (FusionManager.Instance != null && FusionManager.Instance.ActivePlayerCount <= 1)
+        {
+            FusionManager.Instance.SetRoomStatus("finished");
+        }
+
         // 1. ล้างสถานะเกมทั้งหมด
         PlayerPrefs.DeleteKey("GameMode");
         PlayerPrefs.DeleteKey("MatchmakingRoomCode");
@@ -294,6 +302,19 @@ public partial class GameController : MonoBehaviour
 
         hasStartedInitialGameplay = true;
         ClearWarning();
+
+        // [Log→DB] เริ่มเกม — roll match_id ใหม่ (กัน room_id ซ้ำข้ามแมตช์) + ค่าตั้งต้นที่เชื่อถือได้ตั้งแต่ต้น
+        //   หมายเหตุ: roster (names/seat) ย้ายไป log ที่ game_end แทน เพราะที่นี่ (StartInitialGameplay)
+        //   online ชื่อ/seat ยังไม่ sync เสร็จ → ได้ placeholder + localSeat ผิด (ดู game_end)
+        GameLogger.BeginMatch();
+        GameLogger.Log("game_start", new GameLogger.Payload()
+            .Add("players", activePlayerCount)
+            .Add("winScore", winningScore)
+            .Add("online", isOnlineMatchMode)
+            .Add("build", Application.version));
+
+        // [Reconnect/ข้อ1] authority สร้างแถว match_sessions + เก็บ snapshot กระดานก้อนแรก
+        BeginMatchSessionIfAuthority();
         if (FusionManager.Instance != null && isOnlineMatchMode)
         {
             FusionManager.Instance.IsGameInProgress = true;
@@ -312,7 +333,13 @@ public partial class GameController : MonoBehaviour
             FusionManager.Instance.RequestFullState();
         }
 
-        if (QuizManager.Instance != null)
+        // [Reconnect] join กลางเกม → อย่าเริ่ม "ควิซรอบแรก" (เกมดำเนินไปแล้ว)
+        //   สถานะควิซ/เทิร์นปัจจุบันจะมาจาก full-state sync ที่ขอไปแล้ว (RequestFullState ด้านบน)
+        if (ReconnectManager.ConsumeReconnectFlag())
+        {
+            GameLog.Log("[GameController] Reconnect join → ข้ามควิซรอบแรก (ดึงสถานะจาก host แทน)");
+        }
+        else if (QuizManager.Instance != null)
         {
             if (!isOnlineMatchMode)
             {
@@ -383,10 +410,10 @@ public partial class GameController : MonoBehaviour
             UpdateTurnVisuals();
         }
 
-        if (currentTurnTime > 0) 
+        if (currentTurnTime > 0)
         {
             currentTurnTime -= Time.deltaTime;
-            
+
             // อัปเดต Timebar เฉพาะของคนที่กำลังเล่นอยู่
             int activeIdx = playOrder[currentPlayerIndex];
             if (activeIdx >= 0 && activeIdx < players.Length && players[activeIdx] != null)

@@ -9,7 +9,13 @@ public class PlayerUI : MonoBehaviour
     public TextMeshProUGUI scoreText;
     public Image panelBackground;
     public Image characterPortrait; // ภาพประจำตัวละคร
-    public bool isBot; // ระบุว่าเป็นบอทหรือไม่
+
+    // seat นี้ไม่ได้ถูกคุมโดย "คนจริงที่อยู่ในเกม" ด้วย 2 สาเหตุที่แยกกันชัดเจน:
+    public bool isBot;          // offline: เป็นบอท AI จริง (เล่นเอง) — online จะไม่เซ็ตอันนี้
+    public bool isDisconnected; // online: คนจริงหลุดการเชื่อมต่อ (ไม่มีบอทเล่นแทน เทิร์นถูกข้ามด้วย timer)
+
+    // seat "ไม่มีคนจริงคุมอยู่ตอนนี้" (บอท AI หรือคนหลุด) — ใช้บล็อก input + ข้ามเทิร์น
+    public bool IsAbsent => isBot || isDisconnected;
 
     [Header("Name Frame")]
     public Image nameFrameImage; // Image ที่ครอบ nameText — ใส่กรอบจากร้านค้า

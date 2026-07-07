@@ -1,10 +1,13 @@
 // ============================================================
 // Edge Function: submit-match-result (server-authoritative)
-// client ส่งแค่ "อันดับที่จบ" + "จำนวนผู้เล่น" — server เป็นคนคำนวณ MMR/gems เอง
-// => client เขียนค่า MMR/gems ตรง ๆ ไม่ได้ (กันเติมเงิน/ปั่นแรงก์แบบ +9999)
-// หมายเหตุ: ยังเชื่อ "อันดับที่อ้าง" อยู่ (P2P ไม่มี authoritative server) แต่จำกัด
-//           ความเสียหายให้อยู่ในกรอบค่าที่ถูกต้องของเกม
-// deploy: supabase functions deploy submit-match-result   (ต้อง verify-jwt = เปิด)
+// client ส่ง "อันดับ + จำนวนผู้เล่น + room_code/room_id" — server คำนวณ MMR/gems เอง
+// กันโกง 2 ชั้น:
+//   (1) server คำนวณค่า → client ส่ง +9999 ไม่ได้
+//   (2) ผูกผลกับ "ห้องจริงที่ status='finished'" + dedup ใน match_results UNIQUE(user_id, room_id)
+//       → เรียก loop ซ้ำ/ฟาร์มรางวัลไม่ได้ (1 ห้อง = รับได้ครั้งเดียวต่อคน) และต้องเป็นแมตช์ออนไลน์จริง
+// หมายเหตุ: ไม่มีตาราง participant → ยังเช็ค membership ไม่ได้ (จำกัดที่ห้อง finished + dedup)
+//           ปลายทางที่สมบูรณ์ = ให้ host (online authority) ส่งผลของทุกคน
+// deploy: supabase functions deploy submit-match-result   (verify-jwt = เปิด)
 // ============================================================
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -33,7 +36,6 @@ function mmrDelta(placement: number, totalPlayers: number): number {
     if (placement === 3) return -10;
     return -25;
 }
-// รางวัล gems ตามอันดับ (ตรงกับ GameController)
 function gemReward(placement: number): number {
     return placement === 1 ? 5 : placement === 2 ? 3 : placement === 3 ? 2 : 1;
 }
@@ -43,7 +45,7 @@ Deno.serve(async (req) => {
     if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
     try {
-        // ── ระบุตัวตนผู้เล่นจาก JWT (verify-jwt เปิดอยู่) ──
+        // ── ระบุตัวตนจาก JWT ──
         const authHeader = req.headers.get("Authorization") ?? "";
         const userClient = createClient(SUPABASE_URL, ANON_KEY, {
             global: { headers: { Authorization: authHeader } },
@@ -52,7 +54,7 @@ Deno.serve(async (req) => {
         if (userErr || !user) return json({ error: "ไม่ได้เข้าสู่ระบบ" }, 401);
 
         // ── ตรวจ input ──
-        const { placement, totalPlayers } = await req.json();
+        const { placement, totalPlayers, roomCode, roomId } = await req.json();
         if (
             !Number.isInteger(placement) || !Number.isInteger(totalPlayers) ||
             totalPlayers < 2 || totalPlayers > 4 ||
@@ -63,48 +65,64 @@ Deno.serve(async (req) => {
 
         const db = createClient(SUPABASE_URL, SERVICE_ROLE);
 
-        // ── อ่านค่าปัจจุบันของผู้เล่น (ฝั่ง server เท่านั้น) ──
-        const { data: profile } = await db
-            .from("player_profiles")
-            .select("mmr, wins, losses")
-            .eq("id", user.id)
-            .maybeSingle();
+        // ── ผูกกับห้องจริง (กันฟาร์มรางวัล) ──
+        // รับรางวัลได้เฉพาะแมตช์ออนไลน์ที่มีห้องจริง; offline (ไม่มีห้อง) จะไม่ได้รางวัล server
+        // หมายเหตุ: ไม่ require status='finished' เพราะ host เซ็ต finished แบบ async — client มัก
+        //   ส่งผลก่อนสถานะอัปเดตทัน จะถูกปฏิเสธทั้งที่เล่นจริง. กันฟาร์มอาศัย "ห้องจริง + dedup" พอแล้ว
+        const roomCodeStr = typeof roomCode === "string" ? roomCode.trim() : "";
+        const roomIdNum = Number.isInteger(roomId) ? roomId
+            : (typeof roomId === "string" && /^\d+$/.test(roomId.trim()) ? parseInt(roomId.trim(), 10) : NaN);
 
-        const curMmr = profile?.mmr ?? 1000;
-        const curWins = profile?.wins ?? 0;
-        const curLosses = profile?.losses ?? 0;
+        let roomQuery = db.from("rooms").select("id, created_at");
+        if (roomCodeStr.length > 0) roomQuery = roomQuery.eq("room_code", roomCodeStr);
+        else if (Number.isInteger(roomIdNum)) roomQuery = roomQuery.eq("id", roomIdNum);
+        else return json({ error: "ต้องเป็นแมตช์ออนไลน์ (ไม่พบรหัสห้อง)" }, 400);
 
-        // ── server คำนวณเอง ──
+        const { data: rooms } = await roomQuery.order("created_at", { ascending: false }).limit(1);
+        const room = rooms?.[0];
+        if (!room) return json({ error: "ไม่พบห้อง — รับรางวัลได้เฉพาะแมตช์ออนไลน์จริง" }, 400);
+
+        // ── server คำนวณค่าเอง ──
         const delta = mmrDelta(placement, totalPlayers);
-        const newMmr = Math.max(0, curMmr + delta);
         const reward = gemReward(placement);
         const won = placement === 1;
 
-        // อ่าน gems ปัจจุบันแล้วบวกรางวัล (server เป็นคนบวก ไม่ใช่ client ส่งยอดมา)
-        const { data: gemRow } = await db
-            .from("player_profiles")
-            .select("gems")
-            .eq("id", user.id)
-            .maybeSingle();
-        const newGems = (gemRow?.gems ?? 0) + reward;
+        // ── dedup: insert match_results ก่อน (UNIQUE(user_id, room_id) เป็นด่านกัน) ──
+        const { error: insErr } = await db.from("match_results").insert({
+            user_id: user.id, room_id: room.id, placement, total_players: totalPlayers,
+            mmr_delta: delta, gems_awarded: reward,
+        });
 
-        // ── เขียนกลับ (service_role) ──
+        if (insErr) {
+            // 23505 = unique_violation → เคยรับรางวัลห้องนี้ไปแล้ว: คืนค่าปัจจุบัน ไม่ให้ซ้ำ
+            if ((insErr as { code?: string }).code === "23505") {
+                const { data: cur } = await db.from("player_profiles")
+                    .select("mmr, gems").eq("id", user.id).maybeSingle();
+                return json({
+                    newMmr: cur?.mmr ?? 1000, mmrDelta: 0, gemReward: 0,
+                    gems: cur?.gems ?? 0, won, alreadySubmitted: true,
+                });
+            }
+            throw insErr;
+        }
+
+        // ── ผ่านด่าน dedup แล้วค่อยเครดิต (อ่านค่าปัจจุบัน → บวก) ──
+        const { data: profile } = await db.from("player_profiles")
+            .select("mmr, gems, wins, losses").eq("id", user.id).maybeSingle();
+        const curMmr = profile?.mmr ?? 1000;
+        const newMmr = Math.max(0, curMmr + delta);
+        const newGems = (profile?.gems ?? 0) + reward;
+
         const { error: upErr } = await db.from("player_profiles").update({
             mmr: newMmr,
-            wins: won ? curWins + 1 : curWins,
-            losses: won ? curLosses : curLosses + 1,
+            wins: won ? (profile?.wins ?? 0) + 1 : (profile?.wins ?? 0),
+            losses: won ? (profile?.losses ?? 0) : (profile?.losses ?? 0) + 1,
             gems: newGems,
             updated_at: new Date().toISOString(),
         }).eq("id", user.id);
         if (upErr) throw upErr;
 
-        return json({
-            newMmr,
-            mmrDelta: delta,
-            gemReward: reward,
-            gems: newGems,
-            won,
-        });
+        return json({ newMmr, mmrDelta: delta, gemReward: reward, gems: newGems, won });
     } catch (e) {
         console.error(e);
         return json({ error: "เกิดข้อผิดพลาดภายในระบบ" }, 500);

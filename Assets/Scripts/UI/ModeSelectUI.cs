@@ -1,3 +1,4 @@
+using System.Collections;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using TMPro;
@@ -6,6 +7,9 @@ using StartupCity.Audio;
 
 public class ModeSelectUI : MonoBehaviour
 {
+    // เด้งฝึกสอนแค่ครั้งเดียวต่อการรันแอป (กันเด้งซ้ำเวลากลับมาเมนูหลังกด Skip)
+    private static bool _tutorialPromptShownThisSession = false;
+
     [Header("---- UI Panels ----")]
     public GameObject mainMenuPanel;
     public GameObject modeSelectPanel;
@@ -82,6 +86,35 @@ public class ModeSelectUI : MonoBehaviour
             tutorialButton.onClick.RemoveAllListeners();
             tutorialButton.onClick.AddListener(OnClickTutorialMode);
         }
+
+        MaybePromptTutorial();
+    }
+
+    // เด้งถามให้เล่นฝึกสอน ถ้าบัญชีนี้ยังไม่เคยเล่นจบ (เช็คจาก flag ต่อบัญชีใน Supabase / local cache)
+    //   ทำเป็น async ไม่ใช่ coroutine เพราะสคริปต์นี้อยู่บน GameObject "ModeSelectPanel" ซึ่ง Start() สั่งปิดตัวเอง
+    //   (modeSelectPanel = ตัวมันเอง → SetActive(false)) → StartCoroutine บน object ที่ inactive จะพัง ("... is inactive!")
+    //   async รันต่อได้โดยไม่ผูกกับ active state ของ GameObject (continuation กลับ main thread ผ่าน Unity sync context)
+    private async void MaybePromptTutorial()
+    {
+        if (_tutorialPromptShownThisSession) return;   // เด้งไปแล้วรอบนี้ อย่ากวนซ้ำ
+        if (PlayerDataService.IsTutorialCompleted()) return; // ผ่านแล้ว
+
+        // เพิ่งล็อกอิน → profile อาจโหลดยังไม่เสร็จ รอสั้นๆ ให้ได้ค่าจริงจาก server ก่อนตัดสิน
+        float start = Time.realtimeSinceStartup;
+        while (PlayerDataService.LocalProfile == null && Time.realtimeSinceStartup - start < 2f)
+            await System.Threading.Tasks.Task.Delay(50);
+
+        if (this == null) return;                            // ออกจากซีน/ถูกทำลายระหว่างรอ → ยกเลิก (กัน MissingReference)
+        if (PlayerDataService.IsTutorialCompleted()) return;
+
+        // มี popup "กลับเข้าเกมค้าง" (ReconnectManager) โชว์อยู่ → อย่าเด้งซ้อน ให้ reconnect สำคัญกว่า
+        // (คนที่มีเกมออนไลน์ค้างย่อมเล่นเป็นแล้ว รอบหน้าค่อยถามใหม่)
+        if (GameObject.Find("ReconnectPopup") != null) return;
+
+        _tutorialPromptShownThisSession = true;
+        TutorialPromptDialog.Show(
+            onPlay: OnClickTutorialMode, // เข้าฝึกสอนเลย
+            onSkip: () => { });          // ข้าม — ไม่เซ็ต flag (ยังไม่ผ่าน) จะถามใหม่ครั้งหน้าที่เปิดแอป
     }
 
     public void OnClickMainMenuPlay()
@@ -202,6 +235,7 @@ public class ModeSelectUI : MonoBehaviour
         
         // เซ็ตค่าให้ระบบรู้ว่านี่คือโหมดสอนเล่น
         PlayerPrefs.SetString("GameMode", "Tutorial");
+        PlayerPrefs.DeleteKey("MatchmakingRoomCode"); // กันค่าเก่าจากแมตช์ออนไลน์ค้าง ทำให้ IsMatchedOnlineSession() เข้าใจผิดว่าเป็นห้องออนไลน์
         PlayerPrefs.Save();
         
         // โหลดเข้า Scene Tutorial

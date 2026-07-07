@@ -25,7 +25,7 @@ public partial class GameController
         if (BlockActionUntilContinue()) return;
         if (BlockActionOutsideLocalTurn()) return;
         if (isGameOver) return;
-        if (IsCurrentPlayerBot() && !isExecutingBotTurn) {
+        if (IsCurrentSeatAbsent() && !isExecutingBotTurn) {
             ShowWarning("กำลังเป็นเทิร์นของบอต");
             return;
         }
@@ -76,6 +76,13 @@ public partial class GameController
             Transform parentContainer = card.transform.parent;
             int tier = (parentContainer == tier3Container) ? 3 : (parentContainer == tier2Container) ? 2 : 1;
             int slotIndex = card.transform.GetSiblingIndex(); // จำช่องเดิมไว้ก่อนดึงการ์ดออก
+
+            // [Log→DB] บันทึกแอคชั่น "ซื้อการ์ดจากกระดาน" ก่อนการ์ดถูกทำลาย
+            GameLogger.Log("buy_card", new GameLogger.Payload()
+                .Add("seat", playOrder[currentPlayerIndex]).Add("isBot", p.isBot)
+                .Add("cardId", card.data.cardId).Add("tier", tier)
+                .Add("vp", card.data.victoryPoints).Add("round", currentRound));
+
             // ดึงออกจาก container ก่อน Destroy (deferred) ไม่งั้น BuildBoardSnapshot จะนับใบที่กำลังถูกลบติดไปด้วย
             card.transform.SetParent(null);
             Destroy(card.gameObject);
@@ -107,7 +114,7 @@ public partial class GameController
         if (BlockActionUntilContinue()) return;
         if (BlockActionOutsideLocalTurn()) return;
         if (isGameOver) return;
-        if (IsCurrentPlayerBot() && !isExecutingBotTurn) {
+        if (IsCurrentSeatAbsent() && !isExecutingBotTurn) {
             ShowWarning("กำลังเป็นเทิร์นของบอท");
             return;
         }
@@ -133,7 +140,7 @@ public partial class GameController
         if (BlockActionDuringQuiz()) return;
         if (BlockActionUntilContinue()) return;
         if (BlockActionOutsideLocalTurn()) return;
-        if (IsCurrentPlayerBot() && !isExecutingBotTurn) {
+        if (IsCurrentSeatAbsent() && !isExecutingBotTurn) {
             ShowWarning("กำลังเป็นเทิร์นของบอท");
             return;
         }
@@ -149,7 +156,7 @@ public partial class GameController
         if (BlockActionDuringQuiz()) return;
         if (BlockActionUntilContinue()) return;
         if (BlockActionOutsideLocalTurn()) return;
-        if (IsCurrentPlayerBot() && !isExecutingBotTurn) {
+        if (IsCurrentSeatAbsent() && !isExecutingBotTurn) {
             ShowWarning("กำลังเป็นเทิร์นของบอท");
             return;
         }
@@ -174,9 +181,9 @@ public partial class GameController
             if (bankCoins[goldIndex] > 0 && totalPlayerCoins < 10) {
                 bankCoins[goldIndex]--; p.coins[goldIndex]++; p.UpdateUI();
             } else if (bankCoins[goldIndex] <= 0) {
-                ShowWarning("จองสำเร็จ! แต่ไม่ได้เหรียญทอง (กองกลางหมด)");
+                ShowWarning("จองสำเร็จ! แต่ไม่ได้เหรียญพิเศษ/เหรียญดำ (กองกลางหมด)");
             } else if (totalPlayerCoins >= 10) {
-                ShowWarning("จองสำเร็จ! แต่ไม่ได้เหรียญทอง (คุณถือเหรียญเต็ม 10 อันแล้ว)");
+                ShowWarning("จองสำเร็จ! แต่ไม่ได้เหรียญพิเศษ/เหรียญดำ (คุณถือเหรียญเต็ม 10 อันแล้ว)");
             }
         }
 
@@ -193,6 +200,12 @@ public partial class GameController
         Transform parentContainer = card.transform.parent;
         int tier = (parentContainer == tier3Container) ? 3 : (parentContainer == tier2Container) ? 2 : 1;
         int slotIndex = card.transform.GetSiblingIndex(); // จำช่องเดิมไว้ก่อนดึงการ์ดออก
+
+        // [Log→DB] บันทึกแอคชั่น "จองการ์ด"
+        GameLogger.Log("reserve_card", new GameLogger.Payload()
+            .Add("seat", playOrder[currentPlayerIndex]).Add("isBot", p.isBot)
+            .Add("cardId", card.data.cardId).Add("tier", tier).Add("round", currentRound));
+
         // ดึงออกจาก container ก่อน Destroy (deferred) ไม่งั้น BuildBoardSnapshot จะนับใบที่กำลังถูกลบติดไปด้วย
         card.transform.SetParent(null);
         Destroy(card.gameObject);
@@ -229,7 +242,7 @@ public partial class GameController
 
         PlayerUI p = players[playOrder[currentPlayerIndex]]; // เปลี่ยนเป็นเช็คคนเล่นตามคิว
 
-        if (IsCurrentPlayerBot() && !isExecutingBotTurn) {
+        if (IsCurrentSeatAbsent() && !isExecutingBotTurn) {
             ShowWarning("กำลังเป็นเทิร์นของบอท");
             return;
         }
@@ -279,6 +292,13 @@ public partial class GameController
             // reservedCards list (ข้อมูลการ์ดจอง) จัดการฝั่ง legacy เสมอ — core ไม่ render รายการนี้
             p.reservedCards.Remove(card.data);
             p.UpdateUI();
+
+            // [Log→DB] บันทึกแอคชั่น "ซื้อการ์ดที่จองไว้" (tier จาก CardData — การ์ดจองไม่ได้อยู่ใน tier container แล้ว)
+            GameLogger.Log("buy_reserved", new GameLogger.Payload()
+                .Add("seat", playOrder[currentPlayerIndex]).Add("isBot", p.isBot)
+                .Add("cardId", card.data.cardId).Add("tier", card.data.tier)
+                .Add("vp", card.data.victoryPoints)
+                .Add("round", currentRound));
 
             Destroy(card.gameObject);
 

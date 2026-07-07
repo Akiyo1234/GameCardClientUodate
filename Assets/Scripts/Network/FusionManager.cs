@@ -40,7 +40,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     public static FusionManager Instance { get; private set; }
     public event Action PlayerNamesUpdated;       // เมื่อรับชื่อผู้เล่นคนใดก็ตาม
     public event Action ActivePlayersChanged;     // เมื่อคนเข้า/ออกห้อง
-    public event Action<int, int, int, int> TurnStateReceived;  // ชุด Turn State (player, round, total, display)
+    public event Action<int, int, int, int, int, int[]> TurnStateReceived;  // ชุด Turn State (player, round, total, display, remainingSeconds[-1=ไม่ทราบ], playOrder[null=payload เก่า/คงคิวเดิม])
     public event Action<int> QuizStartedReceived;               // เมื่อรับคำสั่งเริ่มควิซจาก Host
     public event Action<QuizAnswerSnapshot> QuizAnswerReceived; // Host รับคำตอบจาก Client
     public event Action<List<QuizAnswerSnapshot>, List<int>> QuizResultsReceived; // ผลควิซจาก Host
@@ -69,6 +69,9 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     private const string BoardStateMessageType = "BOARD";
     private const string QuizRequestMessageType = "QUIZREQ";
     private const string StateRequestMessageType = "STATEREQ";
+    // [Reconnect seat] SEATBIND = client บอก authority ว่า "PlayerId ฉันคือ uid นี้"; SEATMAP = authority ประกาศ seat→PlayerId ให้ทุกคน
+    private const string SeatBindMessageType = "SEATBIND";
+    private const string SeatMapMessageType = "SEATMAP";
     private const string CharacterMessageType = "CHAR";
     private const string FrameMessageType = "FRAME";
     private const string GameActionMessageType = "GACT";    // client → authority: 1 GameAction (base64 ของ GameActionCodec)
@@ -82,6 +85,10 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
 
     // [Shared Mode → Step 5] Stable seat map: index = seat, value = PlayerId (เรียงตามลำดับเข้าห้อง = id จากน้อยไปมาก)
     private readonly List<int> _seatOrder = new List<int>();
+
+    // [Reconnect seat] uid (Supabase) → seat ที่ถูกจอง (authority เก็บถาวรตลอดแมตช์)
+    //   ใช้จับคู่ผู้เล่นที่ reconnect กลับ (PlayerId ใหม่ แต่ uid เดิม) ให้ยึด seat เดิม ไม่กลายเป็นที่นั่งใหม่
+    private readonly Dictionary<string, int> _uidSeat = new Dictionary<string, int>();
 
     private bool _hasPendingQuizStart;
     private int _pendingQuizStartIndex = -1;
@@ -107,6 +114,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     {
         public int[] BankCoins;
         public EconomyPlayerSnapshot[] Players;
+        public int Version;   // = totalTurnCount ตอนส่ง (logical clock กัน snapshot เก่าทับใหม่)
     }
 
     // สถานะการ์ดบนกระดาน (face-up market) สำหรับ sync ออนไลน์
@@ -118,6 +126,10 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         public string[] Tier2CardIds;
         public string[] Tier3CardIds;
         public string[] UsedCardIds;
+        public int Version;   // = totalTurnCount ตอนส่ง (logical clock กัน snapshot เก่าทับใหม่)
+        // [Noble sync] entry ละใบ: "ชื่อขุนนาง~ชื่อคนที่ claim" (ว่างหลัง ~ = ยังไม่ถูก claim)
+        //   null/empty = ผู้ส่งเป็น build เก่า/ยังไม่ setup ขุนนาง → ฝั่งรับข้าม ไม่แตะของเดิม
+        public string[] NobleEntries;
     }
 
     [Header("---- Scene Names ----")]
@@ -395,6 +407,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         _playerCharacters.Clear();
         _playerFrames.Clear();
         _seatOrder.Clear();
+        _uidSeat.Clear();   // [Reconnect seat] กัน mapping uid→seat ของเกมก่อนค้างข้ามเกม → reclaim ผิดเกมใหม่ (คนที่ reconnect ก็ mirror ใหม่จาก SEATMAP)
         _hasPendingQuizStart = false;
         _pendingQuizStartIndex = -1;
 
@@ -411,6 +424,15 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
 
         GameLog.Log($"[Fusion] StartGame → room='{roomName}', mode={mode}, allowCreate={allowSessionCreation}, region='{(Fusion.Photon.Realtime.PhotonAppSettings.TryGetGlobal(out var ps) && ps.AppSettings != null ? ps.AppSettings.FixedRegion : "?")}'");
 
+        // [Reconnect/ข้อ1] ConnectionToken = uid ของผู้เล่น (คงที่ข้ามการต่อใหม่)
+        //   หมายเหตุ: Fusion "ไม่" การันตีคืน PlayerId เดิมตอน rejoin (จริงๆ มักได้ id ใหม่)
+        //   → seat เดิมถูกกู้คืนที่ระดับแอปแทน: client ส่ง SEATBIND(uid) → authority reclaim seat แล้ว broadcast SEATMAP
+        //   (ดู SendLocalSeatBind/HandleSeatBind/ApplySeatMap). ConnectionToken เก็บไว้เผื่อ Fusion ใช้ระบุตัวผู้เล่น
+        //   *** ยังควรตั้ง PlayerTTL ใน Photon Dashboard ให้ slot ค้างพอ ให้กลับเข้ามาทันก่อนโดนเตะออกจากห้อง ***
+        byte[] connToken = null;
+        string myUid = SupabaseManager.Instance?.Client?.Auth?.CurrentUser?.Id;
+        if (!string.IsNullOrEmpty(myUid)) connToken = Encoding.UTF8.GetBytes(myUid);
+
         // เรียก Fusion StartGame (async) แล้ว poll รอผลลัพธ์บน main thread
         var fusionStartTask = _runner.StartGame(new StartGameArgs()
         {
@@ -419,7 +441,8 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
             Scene = targetScene,
             SceneManager = _sceneManager,
             // [Shared Mode · Step 6] Join (allowCreate=false) → ถ้าห้องไม่มีจริงจะ fail ไม่สร้างห้องเดี่ยว
-            EnableClientSessionCreation = allowSessionCreation
+            EnableClientSessionCreation = allowSessionCreation,
+            ConnectionToken = connToken
         });
 
         // poll ทุก frame จนกว่า task จะเสร็จ (max 25 วินาที)
@@ -564,6 +587,8 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         }
 
         RefreshSeatOrder(runner); // ตรึง seat ของผู้เล่นใหม่ (ก่อน refresh UI)
+        // [Reconnect seat] ผูก PlayerId ↔ uid ของ "ตัวเราเอง" → authority ใช้จับคู่ reconnect ให้ยึด seat เดิม
+        if (player == runner.LocalPlayer) SendLocalSeatBind();
         RefreshPlayerList(runner);
         NotifyActivePlayersChanged();
         // ไม่ sync player_count ขึ้น DB ทุกครั้ง — รอ snapshot ตอน LoadGameScene
@@ -597,6 +622,113 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         }
     }
 
+    // ============================================================
+    // [Reconnect seat] จับคู่ผู้เล่นที่กลับเข้ามา (PlayerId ใหม่ แต่ uid เดิม) ให้ยึด seat เดิม
+    //   ปัญหาเดิม: Fusion คืน PlayerId ใหม่ทุกครั้งที่ rejoin → _seatOrder (ผูก PlayerId) มองเป็นคนใหม่ → seat เลื่อน
+    //   วิธีแก้: ผูก seat กับ uid (Supabase) แทน — client ส่ง SEATBIND, authority reclaim + broadcast SEATMAP
+    // ============================================================
+
+    // client ทุกคนเรียกตอน join → บอก authority ว่า PlayerId ของเรา = uid นี้
+    private void SendLocalSeatBind()
+    {
+        if (_runner == null) return;
+        string uid = SupabaseManager.Instance?.Client?.Auth?.CurrentUser?.Id;
+        if (string.IsNullOrEmpty(uid)) return; // ไม่มี uid (ไม่ได้ล็อกอิน) → คงพฤติกรรมเดิม
+
+        int pid = _runner.LocalPlayer.PlayerId;
+        if (IsLocalAuthority(_runner))
+        {
+            HandleSeatBind(pid, uid); // เราเป็น authority → ประมวลผลเอง
+        }
+        else
+        {
+            SendToAuthority(Encoding.UTF8.GetBytes($"{SeatBindMessageType}{PlayerNameSeparator}{pid}{PlayerNameSeparator}{uid}"));
+        }
+    }
+
+    // authority: รับ (PlayerId, uid) → ถ้า uid เคยมี seat แล้ว = reconnect (ยึด seat เดิม), ไม่งั้น = ผู้เล่นใหม่
+    private void HandleSeatBind(int playerId, string uid)
+    {
+        if (_runner == null || !IsLocalAuthority(_runner) || string.IsNullOrEmpty(uid)) return;
+
+        if (_uidSeat.TryGetValue(uid, out int seat))
+        {
+            // reconnect: uid นี้เป็นเจ้าของ seat เดิม → อัปเดตเป็น PlayerId ใหม่
+            //   ลบ PlayerId ใหม่ที่ RefreshSeatOrder เผลอต่อท้ายเป็น seat ปลอมออกก่อน (ถ้ามี) กัน seat เกิน
+            for (int i = _seatOrder.Count - 1; i >= 0; i--)
+            {
+                if (_seatOrder[i] == playerId && i != seat) _seatOrder.RemoveAt(i);
+            }
+            while (_seatOrder.Count <= seat) _seatOrder.Add(-1);
+            _seatOrder[seat] = playerId;
+            GameLog.Log($"[Fusion] SEAT reclaim: uid …{Tail(uid)} กลับมาเป็น PlayerId {playerId} → seat {seat}");
+        }
+        else
+        {
+            // ผู้เล่นใหม่ (ครั้งแรกของ uid นี้) → seat = ตำแหน่งที่ RefreshSeatOrder จัดไว้ (เรียงตาม PlayerId)
+            int idx = _seatOrder.IndexOf(playerId);
+            if (idx < 0) { _seatOrder.Add(playerId); idx = _seatOrder.Count - 1; }
+            _uidSeat[uid] = idx;
+        }
+
+        BroadcastSeatMap();
+    }
+
+    // authority ประกาศตาราง seat→PlayerId ล่าสุดให้ทุกคน (source of truth หลัง reclaim)
+    private void BroadcastSeatMap()
+    {
+        if (_runner == null || !IsLocalAuthority(_runner)) return;
+        // [Reconnect seat · host-migration] แนบ uid ต่อ seat (part 3) ไปด้วย → ทุกเครื่อง mirror _uidSeat ไว้
+        //   จำเป็นตอน "authority เอง (seat pid ต่ำสุด) หลุด": authority ใหม่ต้องมี uid→seat เดิม ถึงจะ reclaim คนที่กลับมาได้
+        //   (เดิม _uidSeat อยู่แค่ authority คนแรก → พอ host หลุด authority ใหม่ว่างเปล่า → คนกลับมาโดนเด้งไป seat ใหม่ ที่เก่ากลายเป็นไม่มีใครคุม)
+        byte[] payload = Encoding.UTF8.GetBytes(
+            $"{SeatMapMessageType}{PlayerNameSeparator}{string.Join(",", _seatOrder)}{PlayerNameSeparator}{BuildSeatUidCsv()}");
+        foreach (var p in _runner.ActivePlayers)
+        {
+            if (p == _runner.LocalPlayer) continue;
+            _runner.SendReliableDataToPlayer(p, default, payload);
+        }
+    }
+
+    // seat i → uid (กลับด้านจาก _uidSeat); ช่องที่ยังไม่รู้ uid = ว่าง. UUID ไม่มี ',' หรือ '|' จึงปลอดภัยกับตัวคั่น
+    private string BuildSeatUidCsv()
+    {
+        string[] uids = new string[_seatOrder.Count];
+        for (int i = 0; i < uids.Length; i++) uids[i] = string.Empty;
+        foreach (var kv in _uidSeat)
+            if (kv.Value >= 0 && kv.Value < uids.Length) uids[kv.Value] = kv.Key;
+        return string.Join(",", uids);
+    }
+
+    // client: รับตาราง seat→PlayerId (+uid) จาก authority → เขียนทับ _seatOrder + mirror _uidSeat, สั่งจัด UI/seat ใหม่ถ้าเปลี่ยน
+    private void ApplySeatMap(string csv, string uidCsv)
+    {
+        if (string.IsNullOrEmpty(csv)) return;
+        var tokens = csv.Split(',');
+        var incoming = new List<int>(tokens.Length);
+        foreach (var t in tokens) if (int.TryParse(t, out int pid)) incoming.Add(pid);
+        if (incoming.Count == 0) return;
+
+        // [Reconnect seat · host-migration] mirror uid→seat จาก authority ไว้เสมอ (แม้ seat ไม่เปลี่ยน)
+        //   → ถ้าเราต้องรับช่วงเป็น authority ใหม่ตอนคนเดิมหลุด จะมี mapping ครบพอ reclaim คนที่กลับมาได้ทันที
+        if (!string.IsNullOrEmpty(uidCsv))
+        {
+            var uidTokens = uidCsv.Split(',');
+            for (int seat = 0; seat < uidTokens.Length; seat++)
+                if (!string.IsNullOrEmpty(uidTokens[seat])) _uidSeat[uidTokens[seat]] = seat;
+        }
+
+        bool changed = incoming.Count != _seatOrder.Count;
+        for (int i = 0; !changed && i < incoming.Count; i++) if (incoming[i] != _seatOrder[i]) changed = true;
+        if (!changed) return;
+
+        _seatOrder.Clear();
+        _seatOrder.AddRange(incoming);
+        NotifyActivePlayersChanged(); // → HandleFusionActivePlayersChanged: จัด panel/seat/disconnected ใหม่
+    }
+
+    private static string Tail(string s) => (s != null && s.Length > 4) ? s.Substring(s.Length - 4) : s;
+
     public void OnPlayerLeft(NetworkRunner runner, PlayerRef player)
     {
         GameLog.Log($"[Fusion] Player left: {player}");
@@ -605,7 +737,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         NotifyPlayerNamesUpdated();
 
         // [Shared Mode] คนหลุดกลางเกม → ไม่เตะทุกคนกลับเมนูแล้ว ปล่อยให้ "บอทเล่นแทน"
-        //   NotifyActivePlayersChanged → HandleFusionActivePlayersChanged → UpdateDisconnectedPlayerBotStatus
+        //   NotifyActivePlayersChanged → HandleFusionActivePlayersChanged → UpdateDisconnectedPlayerStatus
         //   (mark seat เป็นบอท) + ScheduleBotTurnIfNeeded (authority รับช่วงรันบอท)
         RefreshPlayerList(runner);
         NotifyActivePlayersChanged();
@@ -656,7 +788,12 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
 
     public void OnDisconnectedFromServer(NetworkRunner runner, NetDisconnectReason reason)
     {
-        GameLog.Log($"[Fusion] Disconnected from server: {reason}");
+        // [NetDiag] เพิ่ม context ไว้ไล่สาเหตุ disconnect (เทียบ timeline กับ TOOK/APPLY-ECON)
+        //   local = PlayerId ของเครื่องนี้ที่โดนเตะ; reason=ServerLogic + เตะเครื่องที่เพิ่ง rejoin → มักเพราะ "uid ซ้ำ"
+        //   (2 เครื่องล็อกอิน account เดียวกัน → ConnectionToken=uid ชนกัน → server เตะตัวเก่า/ตัวใหม่ทิ้ง)
+        bool wasMaster = runner != null && runner.IsRunning && runner.LocalPlayer == AuthorityPlayer;
+        int localPid = runner != null ? runner.LocalPlayer.PlayerId : -1;
+        GameLog.Log($"[Fusion][NetDiag] Disconnected: reason={reason}, local=Player{localPid}, wasMaster={wasMaster}, players={ActivePlayerCount}, inProgress={IsGameInProgress}");
     }
 
     public void OnConnectRequest(NetworkRunner runner, NetworkRunnerCallbackArgs.ConnectRequest request, byte[] token) { }
@@ -712,6 +849,24 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
                 BroadcastPlayerName(player, playerId, playerName);
             }
 
+            return;
+        }
+        // [Reconnect seat] client → authority: ผูก PlayerId ↔ uid → authority จัด seat แล้ว broadcast SEATMAP
+        if (string.Equals(parts[0], SeatBindMessageType, StringComparison.Ordinal))
+        {
+            if (IsLocalAuthority(runner) && parts.Length >= 3 && int.TryParse(parts[1], out int bindPid))
+            {
+                HandleSeatBind(bindPid, parts[2]);
+            }
+            return;
+        }
+        // [Reconnect seat] authority → clients: ตาราง seat→PlayerId ล่าสุด (ครอบคลุมการ reclaim)
+        if (string.Equals(parts[0], SeatMapMessageType, StringComparison.Ordinal))
+        {
+            if (!IsLocalAuthority(runner) && parts.Length >= 2)
+            {
+                ApplySeatMap(parts[1], parts.Length >= 3 ? parts[2] : null);
+            }
             return;
         }
         if (string.Equals(parts[0], CharacterMessageType, StringComparison.Ordinal))
@@ -800,9 +955,21 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
                 return;
             }
 
+            // [Reconnect fix] field ที่ 6 (optional): เวลาเทิร์นที่เหลือ (วิ) — payload เก่าไม่มี → -1 (ผู้รับ fallback รีเซ็ตเต็ม)
+            int remainingSeconds = -1;
+            if (parts.Length >= 6 && int.TryParse(parts[5], out int parsedRemaining))
+            {
+                remainingSeconds = parsedRemaining;
+            }
+
+            // [Reconnect ข้อ1] field ที่ 7 (optional): playOrder (คิวเทิร์น) CSV คั่นด้วย ',' — payload เก่าไม่มี → null
+            //   จำเป็น: ควิซสลับ playOrder แต่คน reconnect เกิด GameController ใหม่ playOrder รีเซ็ตเป็น [0,1,..]
+            //   ถ้าไม่ส่งคิวมาด้วย currentPlayerIndex จะ map ไปคนละ seat → "เทิร์นกลายเป็นของคนอื่น แต่คนอื่นเห็นเทิร์นเดิม"
+            int[] playOrder = (parts.Length >= 7) ? ParsePlayOrderCsv(parts[6]) : null;
+
             if (IsLocalAuthority(runner))
             {
-                TurnStateReceived?.Invoke(currentPlayerIndex, currentRound, totalTurnCount, currentTurnDisplay);
+                TurnStateReceived?.Invoke(currentPlayerIndex, currentRound, totalTurnCount, currentTurnDisplay, remainingSeconds, playOrder);
 
                 foreach (var activePlayer in runner.ActivePlayers)
                 {
@@ -816,7 +983,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
             }
             else
             {
-                TurnStateReceived?.Invoke(currentPlayerIndex, currentRound, totalTurnCount, currentTurnDisplay);
+                TurnStateReceived?.Invoke(currentPlayerIndex, currentRound, totalTurnCount, currentTurnDisplay, remainingSeconds, playOrder);
             }
 
             return;
@@ -905,6 +1072,8 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
             }
 
             EconomyStateSnapshot snapshot = DecodeEconomyState(parts[1], parts[2]);
+            // version = part สุดท้าย (ถ้าไม่มี/parse ไม่ได้ → 0 = ทำงานแบบเดิม ไม่ guard)
+            snapshot.Version = (parts.Length > 3 && int.TryParse(parts[3], out int econVer)) ? econVer : 0;
             if (IsLocalAuthority(runner))
             {
                 EconomyStateReceived?.Invoke(snapshot);
@@ -939,7 +1108,11 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
                 Tier1CardIds = DecodeStringArray(parts[1]),
                 Tier2CardIds = DecodeStringArray(parts[2]),
                 Tier3CardIds = DecodeStringArray(parts[3]),
-                UsedCardIds = DecodeStringArray(parts[4])
+                UsedCardIds = DecodeStringArray(parts[4]),
+                // version = part ที่ 6 (ถ้าไม่มี → 0 = ทำงานแบบเดิม)
+                Version = (parts.Length > 5 && int.TryParse(parts[5], out int boardVer)) ? boardVer : 0,
+                // [Noble sync] part ที่ 7 (optional): entry คั่นด้วย ';' — payload เก่าไม่มี → null (ฝั่งรับข้าม)
+                NobleEntries = (parts.Length > 6 && !string.IsNullOrEmpty(parts[6])) ? parts[6].Split(';') : null
             };
 
             BoardStateReceived?.Invoke(boardSnapshot);
@@ -1150,14 +1323,14 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
 
 
 
-    public void SendTurnState(int currentPlayerIndex, int currentRound, int totalTurnCount, int currentTurnDisplay)
+    public void SendTurnState(int currentPlayerIndex, int currentRound, int totalTurnCount, int currentTurnDisplay, int remainingSeconds = -1, int[] playOrder = null)
     {
         if (_runner == null)
         {
             return;
         }
 
-        byte[] payload = EncodeTurnStatePayload(currentPlayerIndex, currentRound, totalTurnCount, currentTurnDisplay);
+        byte[] payload = EncodeTurnStatePayload(currentPlayerIndex, currentRound, totalTurnCount, currentTurnDisplay, remainingSeconds, playOrder);
         if (IsLocalAuthority(_runner))
         {
             foreach (var activePlayer in _runner.ActivePlayers)
@@ -1256,7 +1429,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         _runner.SendReliableDataToPlayer(target, default, BuildEconomyPayload(snapshot));
     }
 
-    public void SendTurnStateToPlayer(int playerId, int currentPlayerIndex, int currentRound, int totalTurnCount, int currentTurnDisplay)
+    public void SendTurnStateToPlayer(int playerId, int currentPlayerIndex, int currentRound, int totalTurnCount, int currentTurnDisplay, int remainingSeconds = -1, int[] playOrder = null)
     {
         if (_runner == null || !IsLocalAuthority(_runner) || !TryGetPlayerRef(playerId, out PlayerRef target))
         {
@@ -1264,7 +1437,7 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         }
 
         _runner.SendReliableDataToPlayer(target, default,
-            EncodeTurnStatePayload(currentPlayerIndex, currentRound, totalTurnCount, currentTurnDisplay));
+            EncodeTurnStatePayload(currentPlayerIndex, currentRound, totalTurnCount, currentTurnDisplay, remainingSeconds, playOrder));
     }
 
     private bool TryGetPlayerRef(int playerId, out PlayerRef result)
@@ -1287,21 +1460,27 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
 
     private static byte[] BuildBoardPayload(BoardStateSnapshot snapshot)
     {
+        // version + nobles ต่อท้ายเป็น part ท้ายๆ (backward-compatible: ฝั่งรับเดิมอ่าน parts[1..4] เหมือนเดิม)
+        // nobles: entry คั่นด้วย ';' (คั่น ',' ไม่ได้ — ชนกับ EncodeStringArray) แต่ละ entry = "ชื่อ~คนclaim"
+        string noblesPart = snapshot.NobleEntries != null ? string.Join(";", snapshot.NobleEntries) : string.Empty;
         return Encoding.UTF8.GetBytes(string.Join(
             PlayerNameSeparator.ToString(),
             BoardStateMessageType,
             EncodeStringArray(snapshot.Tier1CardIds),
             EncodeStringArray(snapshot.Tier2CardIds),
             EncodeStringArray(snapshot.Tier3CardIds),
-            EncodeStringArray(snapshot.UsedCardIds)));
+            EncodeStringArray(snapshot.UsedCardIds),
+            snapshot.Version.ToString(),
+            noblesPart));
     }
 
     private static byte[] BuildEconomyPayload(EconomyStateSnapshot snapshot)
     {
         string bankPayload = EncodeIntArray(snapshot.BankCoins);
         string playersPayload = EncodeEconomyPlayers(snapshot.Players);
+        // version ต่อท้ายเป็น part สุดท้าย (backward-compatible)
         return Encoding.UTF8.GetBytes(
-            $"{EconomyStateMessageType}{PlayerNameSeparator}{bankPayload}{PlayerNameSeparator}{playersPayload}");
+            $"{EconomyStateMessageType}{PlayerNameSeparator}{bankPayload}{PlayerNameSeparator}{playersPayload}{PlayerNameSeparator}{snapshot.Version}");
     }
 
     public void SendQuizStart(int questionIndex)
@@ -1535,10 +1714,26 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         return Encoding.UTF8.GetBytes($"{PlayerNameMessageType}{PlayerNameSeparator}{playerId}{PlayerNameSeparator}{safeName}");
     }
 
-    private static byte[] EncodeTurnStatePayload(int currentPlayerIndex, int currentRound, int totalTurnCount, int currentTurnDisplay)
+    private static byte[] EncodeTurnStatePayload(int currentPlayerIndex, int currentRound, int totalTurnCount, int currentTurnDisplay, int remainingSeconds, int[] playOrder)
     {
+        // field 6 (remainingSeconds) + field 7 (playOrder CSV คั่นด้วย ',') เพิ่มแบบ backward-compatible —
+        //   ฝั่งรับเก่าเช็ค parts.Length < 5 แล้วอ่านแค่ parts[1..5] ส่วนเกินทิ้ง; ',' ไม่ชนกับตัวคั่น '|'
+        string playOrderCsv = (playOrder != null && playOrder.Length > 0) ? string.Join(",", playOrder) : string.Empty;
         return Encoding.UTF8.GetBytes(
-            $"{TurnStateMessageType}{PlayerNameSeparator}{currentPlayerIndex}{PlayerNameSeparator}{currentRound}{PlayerNameSeparator}{totalTurnCount}{PlayerNameSeparator}{currentTurnDisplay}");
+            $"{TurnStateMessageType}{PlayerNameSeparator}{currentPlayerIndex}{PlayerNameSeparator}{currentRound}{PlayerNameSeparator}{totalTurnCount}{PlayerNameSeparator}{currentTurnDisplay}{PlayerNameSeparator}{remainingSeconds}{PlayerNameSeparator}{playOrderCsv}");
+    }
+
+    // แปลง playOrder CSV ("1,0,2") → int[]; ว่าง/มี token เสีย → null (ผู้รับ fallback คงคิวเดิม)
+    private static int[] ParsePlayOrderCsv(string csv)
+    {
+        if (string.IsNullOrEmpty(csv)) return null;
+        string[] tokens = csv.Split(',');
+        int[] order = new int[tokens.Length];
+        for (int i = 0; i < tokens.Length; i++)
+        {
+            if (!int.TryParse(tokens[i], out order[i])) return null;
+        }
+        return order.Length > 0 ? order : null;
     }
 
     private static bool TryParseBooleanFlag(string value, out bool result)

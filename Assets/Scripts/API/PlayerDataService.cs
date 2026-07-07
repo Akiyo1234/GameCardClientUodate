@@ -46,8 +46,12 @@ public static class PlayerDataService
             using var req = new HttpRequestMessage(HttpMethod.Post, url);
             req.Headers.TryAddWithoutValidation("apikey", SupabaseConfig.AnonKey);
             req.Headers.TryAddWithoutValidation("Authorization", $"Bearer {token}");
+            // ส่งรหัสห้อง (online) เพื่อผูกผลกับห้องจริง — server กันฟาร์มรางวัลด้วย room_code/room_id
+            // offline: ค่าว่าง → server ปฏิเสธ (ไม่ได้ MMR/gems ลง DB ตามดีไซน์)
+            string roomCode = PlayerPrefs.GetString("MatchmakingRoomCode", "");
+            string roomId = PlayerPrefs.GetString("MatchmakingRoomId", "");
             req.Content = new StringContent(
-                $"{{\"placement\":{placement},\"totalPlayers\":{totalPlayers}}}",
+                $"{{\"placement\":{placement},\"totalPlayers\":{totalPlayers},\"roomCode\":\"{roomCode}\",\"roomId\":\"{roomId}\"}}",
                 Encoding.UTF8, "application/json");
 
             var resp = await _http.SendAsync(req);
@@ -413,6 +417,53 @@ public static class PlayerDataService
         }
     }
 
+    // ───────── Tutorial completion (ต่อบัญชี) ─────────
+
+    /// <summary>เคยเล่นฝึกสอนจบครบทุก step แล้วหรือยัง (ใช้ตัดสินว่าจะเด้งฝึกสอนหลังล็อกอินไหม)</summary>
+    public static bool IsTutorialCompleted()
+    {
+        if (LocalProfile != null) return LocalProfile.TutorialCompleted;
+        return PlayerPrefs.GetInt("TutorialCompleted", 0) == 1;
+    }
+
+    /// <summary>
+    /// บันทึกว่า "เล่นฝึกสอนจบจริง" ต่อบัญชี — เขียน local ทันที (กันเด้งซ้ำแม้ออฟไลน์)
+    /// แล้วยิง RPC mark_tutorial_completed ให้ server เซ็ต flag ตาม auth.uid() (นับเฉพาะเล่นจบ ไม่ใช่กด Skip)
+    /// </summary>
+    public static async Task MarkTutorialCompletedAsync()
+    {
+        // local fast-path: เซ็ตก่อน await เสมอ เพื่อให้เมนูอ่านได้ทันแม้ scene เปลี่ยน/ออฟไลน์
+        PlayerPrefs.SetInt("TutorialCompleted", 1);
+        PlayerPrefs.Save();
+        if (LocalProfile != null) LocalProfile.TutorialCompleted = true;
+
+        var sb = SupabaseManager.Instance?.Client;
+        if (sb?.Auth?.CurrentSession == null)
+        {
+            Debug.LogWarning("[PlayerData] ไม่มี session — เก็บสถานะฝึกสอนไว้ local ก่อน (จะไม่ sync ขึ้น server)");
+            return;
+        }
+
+        try
+        {
+            string url = $"{SupabaseConfig.Url}/rest/v1/rpc/mark_tutorial_completed";
+            using var req = new HttpRequestMessage(HttpMethod.Post, url);
+            req.Headers.TryAddWithoutValidation("apikey", SupabaseConfig.AnonKey);
+            req.Headers.TryAddWithoutValidation("Authorization", $"Bearer {sb.Auth.CurrentSession.AccessToken}");
+            req.Content = new StringContent("{}", Encoding.UTF8, "application/json");
+
+            var resp = await _http.SendAsync(req);
+            if (!resp.IsSuccessStatusCode)
+                Debug.LogWarning($"[PlayerData] mark_tutorial_completed failed ({(int)resp.StatusCode}): {await resp.Content.ReadAsStringAsync()}");
+            else
+                GameLog.Log("[PlayerData] บันทึกสถานะ 'ผ่านฝึกสอน' ขึ้น server แล้ว");
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning($"[PlayerData] MarkTutorialCompleted error: {e.Message}");
+        }
+    }
+
     /// <summary>สวมกรอบ — server ตรวจ ownership ก่อนสวม</summary>
     public static async Task EquipFrameAsync(string itemId)
     {
@@ -493,6 +544,7 @@ public static class PlayerDataService
         
         PlayerPrefs.SetString("EquippedFrame", string.IsNullOrEmpty(p.EquippedFrame) ? "frame_default" : p.EquippedFrame);
         PlayerPrefs.SetInt("SelectedCharacter", p.SelectedCharacter);
+        PlayerPrefs.SetInt("TutorialCompleted", p.TutorialCompleted ? 1 : 0);
         PlayerPrefs.Save();
     }
 
@@ -505,6 +557,7 @@ public static class PlayerDataService
             Username = PlayerPrefs.GetString("Username", "Player"),
             EquippedFrame = PlayerPrefs.GetString("EquippedFrame", "frame_default"),
             SelectedCharacter = PlayerPrefs.GetInt("SelectedCharacter", 0),
+            TutorialCompleted = PlayerPrefs.GetInt("TutorialCompleted", 0) == 1,
         };
         string owned = PlayerPrefs.GetString("OwnedItems", "");
         LocalProfile.OwnedFrames = string.IsNullOrEmpty(owned)

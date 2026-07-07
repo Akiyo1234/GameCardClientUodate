@@ -154,6 +154,12 @@ public class ResultScreenUI : MonoBehaviour
         GameLog.Log($"[ResultUI] แสดงหน้าจอ {(isGameOver ? "Match" : "Quiz")}: {title}");
     }
 
+    // ใช้โดย Tutorial: ห้าม auto-close กดปุ่มแทนผู้เล่น ต้องให้ผู้เล่นฝึกกดเอง
+    public void DisableAutoClose()
+    {
+        isAutoCloseEnabled = false;
+    }
+
     public void OnActionButtonClick()
     {
         AudioManager.Instance?.PlayButtonClick();
