@@ -158,6 +158,7 @@ public partial class GameController : MonoBehaviour
             FusionManager.Instance.BoardStateReceived += HandleOnlineBoardStateReceived;
             FusionManager.Instance.FullStateRequested += HandleFullStateRequested;
             FusionManager.Instance.PlayerCharacterReceived += ApplyRemoteCharacterPortrait;
+            FusionManager.Instance.PlayerFrameReceived += ApplyRemoteNameFrame;
         }
 
         EnsureBotController();
@@ -379,6 +380,7 @@ public partial class GameController : MonoBehaviour
             FusionManager.Instance.BoardStateReceived -= HandleOnlineBoardStateReceived;
             FusionManager.Instance.FullStateRequested -= HandleFullStateRequested;
             FusionManager.Instance.PlayerCharacterReceived -= ApplyRemoteCharacterPortrait;
+            FusionManager.Instance.PlayerFrameReceived -= ApplyRemoteNameFrame;
         }
     }
 

@@ -159,6 +159,33 @@ public static class PlayerDataService
         }
     }
 
+    /// <summary>
+    /// ดึงข้อมูลกรอบและรูปประจำตัวของผู้เล่นคนอื่นจาก DB โดยตรง (ป้องกันการโกง/ข้อมูลไม่ตรงกันผ่านเครือข่าย)
+    /// </summary>
+    public static async Task<(string frame, int character)> GetPlayerCosmeticsAsync(string uid)
+    {
+        var sb = SupabaseManager.Instance?.Client;
+        if (sb == null || string.IsNullOrEmpty(uid)) return ("frame_default", 0);
+        
+        try
+        {
+            var result = await sb.From<PlayerProfile>()
+                .Select("equipped_frame, selected_character")
+                .Filter("id", Postgrest.Constants.Operator.Equals, uid)
+                .Single();
+            
+            if (result != null)
+            {
+                return (result.EquippedFrame, result.SelectedCharacter);
+            }
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning($"[PlayerData] GetPlayerCosmetics failed for {uid}: {e.Message}");
+        }
+        return ("frame_default", 0);
+    }
+
     // local-only: อัปเดต cache สำหรับ UI เท่านั้น — การเขียน gems ลง DB ทำผ่าน
     // server function (purchase-item / grant-quiz-reward / submit-match-result) เท่านั้น
     public static Task SaveCurrencyAsync(int gems)
@@ -331,7 +358,7 @@ public static class PlayerDataService
         }
     }
 
-    /// <summary>ดึงคำถามที่ผู้เล่นยังไม่เคยตอบ (ผ่าน Supabase RPC get_unanswered_daily_questions)</summary>
+    /// <summary>ดึงคำถามรายวัน (ผ่าน Supabase RPC get_daily_quiz_question)</summary>
     public static async Task<string> FetchUnansweredDailyQuestionIdAsync()
     {
         var sb = SupabaseManager.Instance?.Client;
@@ -340,7 +367,7 @@ public static class PlayerDataService
         try
         {
             string userId = sb.Auth.CurrentUser.Id;
-            string url = $"{SupabaseConfig.Url}/rest/v1/rpc/get_unanswered_daily_questions";
+            string url = $"{SupabaseConfig.Url}/rest/v1/rpc/get_daily_quiz_question";
             using var req = new HttpRequestMessage(HttpMethod.Post, url);
             req.Headers.TryAddWithoutValidation("apikey", SupabaseConfig.AnonKey);
             req.Headers.TryAddWithoutValidation("Authorization", $"Bearer {sb.Auth.CurrentSession.AccessToken}");
@@ -350,7 +377,7 @@ public static class PlayerDataService
             string body = await resp.Content.ReadAsStringAsync();
             if (!resp.IsSuccessStatusCode)
             {
-                Debug.LogWarning($"[PlayerData] get_unanswered_daily_questions failed: {body}");
+                Debug.LogWarning($"[PlayerData] get_daily_quiz_question failed: {body}");
                 return null;
             }
 

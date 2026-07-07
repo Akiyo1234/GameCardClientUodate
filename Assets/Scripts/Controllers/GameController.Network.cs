@@ -310,6 +310,28 @@ public partial class GameController
         }
     }
 
+    // [NEW] รับ event PlayerFrameReceived (playerId, frameId) จาก FusionManager (ดึงจาก DB)
+    // แล้วโหลด Sprite จาก Resources/Frames/ และ apply ลง nameFrameImage ของ seat นั้น
+    private void ApplyRemoteNameFrame(int playerId, string frameId)
+    {
+        if (!isOnlineMatchMode || players == null || FusionManager.Instance == null) return;
+
+        int seatIndex = FusionManager.Instance.GetSeatIndexForPlayerId(playerId);
+        if (seatIndex < 0 || seatIndex >= players.Length || players[seatIndex] == null)
+        {
+            GameLog.Log($"[GameController] ApplyRemoteNameFrame: seatIndex={seatIndex} invalid for playerId={playerId}");
+            return;
+        }
+
+        string effectiveId = string.IsNullOrEmpty(frameId) ? ShopManager.DEFAULT_FRAME : frameId;
+        Sprite frameSprite = Resources.Load<Sprite>($"Frames/{effectiveId}");
+        if (frameSprite == null && effectiveId != ShopManager.DEFAULT_FRAME)
+            frameSprite = Resources.Load<Sprite>($"Frames/{ShopManager.DEFAULT_FRAME}");
+
+        players[seatIndex].ApplyNameFrame(frameSprite, UnityEngine.Color.white);
+        GameLog.Log($"[GameController] Set frame for seat {seatIndex} (playerId={playerId}) → {effectiveId}");
+    }
+
     // ส่ง character ของเราให้คนอื่นเห็น หลัง Photon พร้อม (frame/re-apply ถูกถอดออกแล้ว)
     private IEnumerator DelayedSyncLocalProfile()
     {

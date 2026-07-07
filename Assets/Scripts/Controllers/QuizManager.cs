@@ -550,6 +550,8 @@ public class QuizManager : MonoBehaviour
 
     private void PlayTimerSound()
     {
+        // [MODIFIED] ผู้ใช้แจ้งว่าเสียงนาฬิกาบัค จึงให้ปิดการใช้งานส่วนนี้ไปเลย
+        /*
         if (audioSource != null && timerSfx != null)
         {
             // [BUGFIX] หยุดเสียง tick เดิมก่อนเล่นใหม่ (timerSfx อาจยาวกว่า 1 วินาที → stack กันได้)
@@ -560,6 +562,7 @@ public class QuizManager : MonoBehaviour
         {
             StartupCity.Audio.AudioManager.Instance?.PlayTimerTick();
         }
+        */
     }
 
     /// <summary>หยุดเสียงนับถอยหลังทันที — เรียกตอนตอบเสร็จ/หมดเวลา</summary>

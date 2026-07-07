@@ -215,7 +215,7 @@ public class ReconnectManager : MonoBehaviour
 
         // ── ปุ่ม "ไม่กลับเข้าเกม" (ซ้าย) ──
         _popupCancel = CreateButton("Cancel", panel.transform, "ไม่กลับเข้าเกม",
-            new Color(0.35f, 0.35f, 0.40f, 1f), ClosePopup);
+            new Color(0.35f, 0.35f, 0.40f, 1f), OnCancelClicked);
         var xRt = _popupCancel.GetComponent<RectTransform>();
         xRt.anchorMin = xRt.anchorMax = new Vector2(0.5f, 0); xRt.pivot = new Vector2(0.5f, 0);
         xRt.sizeDelta = new Vector2(320, 90);
@@ -233,6 +233,13 @@ public class ReconnectManager : MonoBehaviour
     private void ClosePopup()
     {
         if (_popupRoot != null) { Destroy(_popupRoot); _popupRoot = null; }
+    }
+
+    private void OnCancelClicked()
+    {
+        GameLog.Log("[Reconnect] ผู้เล่นปฏิเสธการกลับเข้าเกม → ปิด session ไม่ถามซ้ำ");
+        AbandonSession();
+        ClosePopup();
     }
 
     // ── UI factory helpers ──

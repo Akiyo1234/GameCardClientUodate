@@ -90,6 +90,9 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
     //   ใช้จับคู่ผู้เล่นที่ reconnect กลับ (PlayerId ใหม่ แต่ uid เดิม) ให้ยึด seat เดิม ไม่กลายเป็นที่นั่งใหม่
     private readonly Dictionary<string, int> _uidSeat = new Dictionary<string, int>();
 
+    // เก็บรายการ PlayerId ที่ดึงข้อมูล Frame/Avatar จาก DB แล้ว
+    private readonly HashSet<int> _fetchedCosmeticsPid = new HashSet<int>();
+
     private bool _hasPendingQuizStart;
     private int _pendingQuizStartIndex = -1;
     public bool IsGameInProgress { get; set; } = false;
@@ -408,6 +411,8 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         _playerFrames.Clear();
         _seatOrder.Clear();
         _uidSeat.Clear();   // [Reconnect seat] กัน mapping uid→seat ของเกมก่อนค้างข้ามเกม → reclaim ผิดเกมใหม่ (คนที่ reconnect ก็ mirror ใหม่จาก SEATMAP)
+        _fetchedCosmeticsPid.Clear();
+        _fetchedCosmeticsUid.Clear();
         _hasPendingQuizStart = false;
         _pendingQuizStartIndex = -1;
 
@@ -570,20 +575,12 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         if (player == runner.LocalPlayer && !IsLocalAuthority(runner))
         {
             SendLocalPlayerNameToServer();
-            int myCharIndex = UnityEngine.PlayerPrefs.GetInt("SelectedCharacter", 0);
-            SendLocalCharacterToServer(myCharIndex);
-            
-            string myFrameId = ShopManager.GetEquippedFrame();
-            SendLocalFrameToServer(myFrameId);
+            // Cosmetics ถูกดึงจาก DB แทนการส่งผ่านเน็ตเวิร์กแล้ว (ใน FetchCosmeticsFromDb)
         }
 
         if (IsLocalAuthority(runner) && player == runner.LocalPlayer)
         {
-            int myCharIndex = UnityEngine.PlayerPrefs.GetInt("SelectedCharacter", 0);
-            BroadcastLocalCharacter(myCharIndex);
-
-            string myFrameId = ShopManager.GetEquippedFrame();
-            BroadcastLocalFrame(myFrameId);
+            // Cosmetics ถูกดึงจาก DB แทนการส่งผ่านเน็ตเวิร์กแล้ว
         }
 
         RefreshSeatOrder(runner); // ตรึง seat ของผู้เล่นใหม่ (ก่อน refresh UI)
@@ -671,6 +668,8 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
             _uidSeat[uid] = idx;
         }
 
+        FetchCosmeticsFromDb(playerId, uid);
+
         BroadcastSeatMap();
     }
 
@@ -711,11 +710,20 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
 
         // [Reconnect seat · host-migration] mirror uid→seat จาก authority ไว้เสมอ (แม้ seat ไม่เปลี่ยน)
         //   → ถ้าเราต้องรับช่วงเป็น authority ใหม่ตอนคนเดิมหลุด จะมี mapping ครบพอ reclaim คนที่กลับมาได้ทันที
+        //   [Cosmetics fix] ดึง cosmetics ก่อน early-return เสมอ → reconnect ที่ seat ไม่เปลี่ยนก็ยังได้ cosmetics ถูกต้อง
         if (!string.IsNullOrEmpty(uidCsv))
         {
             var uidTokens = uidCsv.Split(',');
             for (int seat = 0; seat < uidTokens.Length; seat++)
-                if (!string.IsNullOrEmpty(uidTokens[seat])) _uidSeat[uidTokens[seat]] = seat;
+            {
+                if (!string.IsNullOrEmpty(uidTokens[seat])) 
+                {
+                    string uid = uidTokens[seat];
+                    _uidSeat[uid] = seat;
+                    int pid = seat < incoming.Count ? incoming[seat] : -1;
+                    if (pid >= 0) FetchCosmeticsFromDb(pid, uid);
+                }
+            }
         }
 
         bool changed = incoming.Count != _seatOrder.Count;
@@ -725,6 +733,30 @@ public class FusionManager : MonoBehaviour, INetworkRunnerCallbacks
         _seatOrder.Clear();
         _seatOrder.AddRange(incoming);
         NotifyActivePlayersChanged(); // → HandleFusionActivePlayersChanged: จัด panel/seat/disconnected ใหม่
+    }
+
+    // [Cosmetics] ดึงข้อมูล Frame+Avatar จาก DB ตรงๆ ผ่าน uid (server-authoritative)
+    //   ใช้ uid เป็น key กัน fetch ซ้ำ — แต่ถ้า PlayerId เปลี่ยน (reconnect) ให้ fetch ใหม่เพื่ออัปเดต UI
+    private readonly HashSet<string> _fetchedCosmeticsUid = new HashSet<string>();
+
+    private async void FetchCosmeticsFromDb(int playerId, string uid)
+    {
+        if (string.IsNullOrEmpty(uid)) return;
+        
+        // กัน fetch ซ้ำสำหรับ uid+playerId คู่เดิม (reconnect = uid เดิม PlayerId ใหม่ → ยัง fetch ใหม่ได้)
+        if (_fetchedCosmeticsPid.Contains(playerId) && _fetchedCosmeticsUid.Contains(uid)) return;
+        _fetchedCosmeticsPid.Add(playerId);
+        _fetchedCosmeticsUid.Add(uid);
+        
+        var (frame, character) = await PlayerDataService.GetPlayerCosmeticsAsync(uid);
+        _playerCharacters[playerId] = character;
+        _playerFrames[playerId] = frame;
+        
+        GameLog.Log($"[Fusion] FetchCosmetics uid=…{Tail(uid)} pid={playerId} → frame={frame} char={character}");
+        
+        // Notify GameController → update portrait + nameframe UI
+        PlayerCharacterReceived?.Invoke(playerId, character);
+        PlayerFrameReceived?.Invoke(playerId, frame);
     }
 
     private static string Tail(string s) => (s != null && s.Length > 4) ? s.Substring(s.Length - 4) : s;
